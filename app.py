@@ -3,10 +3,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import json
 import io
+import datetime
 
 # --- НАЛАШТУВАННЯ СТОРІНКИ ---
 st.set_page_config(
-    page_title="ГІС Диспетчерська Система Регіональних Електромереж v2.0",
+    page_title="ГІС Диспетчерська Система Регіональних Електромереж v2.5",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -15,25 +16,31 @@ st.set_page_config(
 plt.style.use('dark_background')
 
 # --- ІНІЦІАЛІЗАЦІЯ ДАНИХ У СЕСІЇ ---
-# Ключі змінено на 'latitude' та 'longitude' для автоматичного розпізнавання картою
 if "objects" not in st.session_state:
     st.session_state.objects = [
-        {"name": "ТП-12", "type": "Підстанція", "status": "Нормальна", "desc": "ВН-110 кВ, Навантаження: 70%. Ремонтів: 3. Останній: 2023-06", "latitude": 49.2331, "longitude": 28.4682},
-        {"name": "ТП-28", "type": "Підстанція", "status": "Нормальна", "desc": "ВН-35 кВ, Навантаження: 45%. Ремонтів: 1. Останній: 2024-03", "latitude": 49.2425, "longitude": 28.4810},
-        {"name": "ТП-245", "type": "Підстанція", "status": "АВАРІЯ", "desc": "ВН-10 кВ, Навантаження: 95%! Потребує термінової заміни! Ремонтів: 7.", "latitude": 49.2210, "longitude": 28.4422},
-        {"name": "ТП-67", "type": "Підстанція", "status": "Нормальна", "desc": "ВН-35 кВ, Навантаження: 30%. Новий об'єкт.", "latitude": 49.2512, "longitude": 28.4935},
-        {"name": "Оп. №8", "type": "Опора", "status": "Норма", "desc": "ЖБ СВ-110. Задовільний стан. Огляд: 2024-01", "latitude": 49.2295, "longitude": 28.4550},
-        {"name": "Оп. №9", "type": "Опора", "status": "Попередження", "desc": "Пошкоджено ізолятор після грози. Рекомендовано ремонт.", "latitude": 49.2310, "longitude": 28.4585},
-        {"name": "Оп. №10", "type": "Опора", "status": "Норма", "desc": "ЖБ СВ-110. Огляд: 2024-05. Норма", "latitude": 49.2325, "longitude": 28.4610},
+        {"name": "ТП-12", "type": "Підстанція", "status": "Нормальна", "desc": "ВН-110 кВ, Навантаження: 70%. Ремонтів: 3.", "latitude": 49.2331, "longitude": 28.4682, "criticality": "Висока"},
+        {"name": "ТП-28", "type": "Підстанція", "status": "Нормальна", "desc": "ВН-35 кВ, Навантаження: 45%. Ремонтів: 1.", "latitude": 49.2425, "longitude": 28.4810, "criticality": "Середня"},
+        {"name": "ТП-245", "type": "Підстанція", "status": "АВАРІЯ", "desc": "ВН-10 кВ, Навантаження: 95%! Потребує термінової заміни!", "latitude": 49.2210, "longitude": 28.4422, "criticality": "Критична"},
+        {"name": "ТП-67", "type": "Підстанція", "status": "Нормальна", "desc": "ВН-35 кВ, Навантаження: 30%. Новий об'єкт.", "latitude": 49.2512, "longitude": 28.4935, "criticality": "Середня"},
+        {"name": "Оп. №8", "type": "Опора", "status": "Норма", "desc": "ЖБ СВ-110. Задовільний стан. Огляд: 2024-01", "latitude": 49.2295, "longitude": 28.4550, "criticality": "Низька"},
+        {"name": "Оп. №9", "type": "Опора", "status": "Попередження", "desc": "Пошкоджено ізолятор після грози. Рекомендовано ремонт.", "latitude": 49.2310, "longitude": 28.4585, "criticality": "Середня"},
+        {"name": "Оп. №10", "type": "Опора", "status": "Норма", "desc": "ЖБ СВ-110. Огляд: 2024-05. Норма", "latitude": 49.2325, "longitude": 28.4610, "criticality": "Низька"},
     ]
 
 if "log_data" not in st.session_state:
     st.session_state.log_data = [
-        {"Час": "23.05 09:14", "Тип": "Аварія", "Об'єкт": "ТП-245", "Опис": "Відключення трансформатора, немає напруги"},
-        {"Час": "23.05 08:52", "Тип": "Аварія", "Об'єкт": "Оп. №9", "Опис": "Пошкоджено ізолятор після грози"},
-        {"Час": "23.05 07:30", "Тип": "Планове ТО", "Об'єкт": "ТП-12", "Опис": "Регламентне обслуговування трансформатора"},
-        {"Час": "22.05 18:45", "Тип": "Ремонт", "Об'єкт": "КЛ-3", "Опис": "Замінено кабельну муфту 10 кВ"},
-        {"Час": "22.05 15:20", "Тип": "Інспекція", "Об'єкт": "Оп. №11", "Опис": "Виявлено корозію на опорі 1988 р."}
+        {"Час": "23.05 09:14", "Тип": "Аварія", "Об'єкт": "ТП-245", "Опис": "Відключення трансформатора, немає напруги", "Критичність": "Критична"},
+        {"Час": "23.05 08:52", "Тип": "Аварія", "Об'єкт": "Оп. №9", "Опис": "Пошкоджено ізолятор після грози", "Критичність": "Середня"},
+        {"Час": "23.05 07:30", "Тип": "Планове ТО", "Об'єкт": "ТП-12", "Опис": "Регламентне обслуговування трансформатора", "Критичність": "Висока"},
+        {"Час": "22.05 18:45", "Тип": "Ремонт", "Об'єкт": "КЛ-3", "Опис": "Замінено кабельну муфту 10 кВ", "Критичність": "Висока"},
+        {"Час": "22.05 15:20", "Тип": "Інспекція", "Об'єкт": "Оп. №11", "Опис": "Виявлено корозію на опорі 1988 р.", "Критичність": "Низька"}
+    ]
+
+if "schedule_data" not in st.session_state:
+    st.session_state.schedule_data = [
+        {"Дата": "2026-05-24", "Об'єкт": "ТП-12", "Вид робіт": "Регламентне ТО силового трансформатора", "Статус": "Заплановано"},
+        {"Дата": "2026-05-26", "Об'єкт": "КЛ-3", "Вид робіт": "Діагностика ізоляції кабелю 10 кВ", "Статус": "Підготовка"},
+        {"Дата": "2026-05-28", "Об'єкт": "Оп. №11", "Вид робіт": "Заміна застарілої стійки опори", "Статус": "Заплановано"},
     ]
 
 if "selected_object" not in st.session_state:
@@ -42,41 +49,39 @@ if "selected_object" not in st.session_state:
 if "task_closed" not in st.session_state:
     st.session_state.task_closed = False
 
-# --- ГОЛОВНЕ МЕНЮ (ВКЛАДКИ) ---
+# --- ГОЛОВНЕ МЕНЮ ---
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🏢 Диспетчер мапи", 
     "📱 Мобільний клієнт", 
     "📊 Аналітика та KPI", 
     "📋 Журнал подій", 
     "📅 Планування ТО",
-    "💾 Data Центр (Імпорт/Експорт)"
+    "💾 Data Центр"
 ])
 
 # ==========================================
-# ВКАДКА 1: ДИСПЕТЧЕР МАПИ
+# ВКЛАДКА 1: ДИСПЕТЧЕР МАПИ
 # ==========================================
 with tab1:
-    st.title("🏢 Оперативний диспетчерський пульт")
-    col_map, col_side = st.columns([2.5, 1])
+    st.title("🏢 Оперативний диспетчерський пульт ГІС")
+    col_map, col_side = st.columns([2.3, 1])
     
     with col_map:
-        st.subheader("🗺️ Інтерактивна ГІС-карта енергомережі")
+        # Нова фіча: Симуляція режимів відображення мережі
+        mode = st.radio("🛠️ Режим відображення шарів мережі:", ["Стандартний ГІС", "Вечірній максимум (Навантаження)", "Аварійні ділянки"], horizontal=True)
         
-        # Конвертація у DataFrame
+        # Безпечна конвертація та рендеринг карти
         map_df = pd.DataFrame(st.session_state.objects)
-        
-        # БЕЗПЕЧНИЙ ВИКЛИК КАРТИ: Streamlit автоматично підтягне стовпці 'latitude' та 'longitude'
-        st.map(map_df, size=30)
+        st.map(map_df, size=35)
         
         st.markdown("##### 🔍 Швидкий вибір об'єкта зі списку:")
         obj_names = [o["name"] for o in st.session_state.objects]
-        
         try:
             curr_index = obj_names.index(st.session_state.selected_object["name"])
         except ValueError:
             curr_index = 2
             
-        selected_name = st.selectbox("Оберіть вузол для виведення телеметрії:", obj_names, index=curr_index)
+        selected_name = st.selectbox("Оберіть вузол для виведення телеметрії та SCADA систем:", obj_names, index=curr_index)
         
         for o in st.session_state.objects:
             if o["name"] == selected_name:
@@ -84,30 +89,33 @@ with tab1:
 
     with col_side:
         obj = st.session_state.selected_object
-        st.subheader("ℹ️ Телеметрія вузла")
+        st.subheader("ℹ️ Телеметрія та Управління")
+        
         st.markdown(f"### {obj['name']}")
-        
-        if "АВАРІЯ" in obj['status']:
-            st.error(f"Статус: {obj['status']}")
-        elif "Попередження" in obj['status']:
-            st.warning(f"Статус: {obj['status']}")
-        else:
-            st.success(f"Статус: {obj['status']}")
+        if "АВАРІЯ" in obj['status']: st.error(f"Статус: {obj['status']}")
+        elif "Попередження" in obj['status']: st.warning(f"Статус: {obj['status']}")
+        else: st.success(f"Статус: {obj['status']}")
             
-        st.markdown(f"**Тип:** {obj['type']}")
+        st.markdown(f"**Важливість вузла:** `{obj['criticality']}`")
         st.markdown(f"**Координати:** `{obj['latitude']:.4f}° N, {obj['longitude']:.4f}° E`")
-        st.markdown(f"**Опис:** {obj['desc']}")
+        st.markdown(f"**Опис та параметри:** {obj['desc']}")
         
+        # Нова фіча: Інструменти телеуправління SCADA для диспетчера
         st.divider()
-        st.markdown("💬 **Комунікаційний хаб (API):**")
-        
-        if st.button("📲 Надіслати наряд на смартфон бригади", use_container_width=True):
-            st.toast(f"📡 API Сигнал: Наряд для {obj['name']} успішно відправлено через шлюз сповіщень!")
-            st.success("✅ Сповіщення доставлено на пристрій Бригади 1.")
+        st.markdown("🎛️ **Дистанційне керування (SCADA):**")
+        c1, c2 = st.columns(2)
+        if c1.button("⚡ Вимкнути вимикач ВВ", use_container_width=True):
+            st.toast(f"🚨 Надіслано сигнал вимкнення на {obj['name']}!")
+            st.session_state.log_data.insert(0, {"Час": datetime.datetime.now().strftime("%d.%m %H:%M"), "Тип": "Ремонт", "Об'єкт": obj['name'], "Опис": "Дистанційне оперативне вимкнення вимикача диспетчером.", "Критичність": "Висока"})
+        if c2.button("🟢 Увімкнути АВР", use_container_width=True):
+            st.success(f"Автоматика резерву на {obj['name']} активна.")
             
         st.divider()
-        st.markdown("📄 **Генератор документів:**")
-        permit_text = f"НАРЯД-ДОПУСК №{obj['name']}-2026\nОб'єкт: {obj['name']} ({obj['type']})\nСтатус: {obj['status']}\nКоординати: {obj['latitude']}, {obj['longitude']}\nСпецифікація: {obj['desc']}\nВідповідальний керівник: Іваненко М.\nДата створення: 23.05.2026"
+        st.markdown("📲 **Комунікаційний хаб:**")
+        if st.button("📲 Надіслати оперативний наряд бригаді", use_container_width=True):
+            st.toast(f"📡 API: Наряд для {obj['name']} надіслано в польовий додаток!")
+            
+        permit_text = f"НАРЯД-ДОПУСК №{obj['name']}-2026\nОб'єкт: {obj['name']} ({obj['type']})\nКритичність: {obj['criticality']}\nКоординати: {obj['latitude']}, {obj['longitude']}\nОпис: {obj['desc']}\nЗгенеровано системою Вінницяобленерго."
         st.download_button(
             label="📄 Завантажити Наряд-Допуск (.txt)",
             data=permit_text,
@@ -117,159 +125,183 @@ with tab1:
         )
 
 # ==========================================
-# ВКАДКА 2: МОБІЛЬНИЙ КЛІЄНТ
+# ВКАДКА 2: МОБІЛЬНИЙ КЛІЄНТ (З ЧЕК-ЛИСТОМ ТБ)
 # ==========================================
 with tab2:
-    st.title("📱 Інтерфейс лінійної бригади")
+    st.title("📱 Цифровий кабінет лінійної бригади")
     _, phone_col, _ = st.columns([1, 2, 1])
     with phone_col:
         st.markdown("---")
-        st.markdown("<h3 style='text-align: center; color: #185FA5;'>📱 Польовий ГІС-Клієнт</h3>", unsafe_allow_html=True)
-        st.info("👷 Бригада 1 | GPS: Активний (49.2210 N, 28.4422 E)")
+        st.markdown("<h3 style='text-align: center; color: #185FA5;'>📱 Мобильний додаток ОВБ</h3>", unsafe_allow_html=True)
+        st.info("👷 Бригада №1 (ОВБ Центр) | GPS: Активний")
         
         if st.session_state.task_closed:
-            st.success("🎉 Завдання закрито! Звіт надіслано диспетчеру.")
-            if st.button("Отримати нове завдання"):
+            st.success("🎉 Звіт успішно відправлено на сервер! Очікуйте нових розпоряджень.")
+            if st.button("🔄 Оновити та отримати нове завдання"):
                 st.session_state.task_closed = False
                 st.rerun()
         else:
-            st.warning("🚨 **Поточна задача:** Аварія на ТП-245 (м. Вінниця)")
-            sub_tab1, sub_tab2, sub_tab3 = st.tabs(["🗺️ Навігація", "📄 ГІС Паспорт", "📥 Звіт"])
+            st.warning("🚨 **Поточне завдання:** Усунення пошкодження на ТП-245")
+            sub_tab1, sub_tab2, sub_tab3 = st.tabs(["🗺️ Навігатор", "🔒 Техніка безпеки", "📥 Звіт"])
+            
             with sub_tab1:
-                st.write("⏱️ Розрахунковий час прибуття: 11 хв | 📏 Відстань: 1.8 км")
-                crew_loc = pd.DataFrame([{"latitude": 49.2210, "longitude": 28.4422}])
-                st.map(crew_loc, zoom=14, size=20)
+                st.write("⏱️ Розрахунковий час приїзду: 8 хв")
+                st.map(pd.DataFrame([{"latitude": 49.2210, "longitude": 28.4422}]), zoom=14)
+                
             with sub_tab2:
-                st.code("Тип: ВН-10 кВ\nТрансформатор: ТМ-400/10\nРік встановлення: 2001\nЗапобіжники: ПК-10, 3×25А", language="text")
+                st.markdown("⚠️ **Обов'язковий чек-лист допуску до роботи:**")
+                tb_1 = st.checkbox("Перевірено відсутність напруги покажчиком")
+                tb_2 = st.checkbox("Встановлено переносні заземлення")
+                tb_3 = st.checkbox("Вивішено плакати 'НЕ ВМИКАТИ! РОБОТА ТУТ!'")
+                
             with sub_tab3:
-                comment = st.text_area("Коментар щодо усунення пошкодження", placeholder="Наприклад: Замінено високовольтні запобіжники...")
-                if st.button("✅ Виконано", use_container_width=True):
-                    if comment:
+                comment = st.text_area("Введіть технічний коментар виконаних робіт:", placeholder="Опишіть заміну запобіжників, ліквідацію КЗ...")
+                if st.button("🚀 Надіслати звіт диспетчеру", use_container_width=True):
+                    if not (tb_1 and tb_2 and tb_3):
+                        st.error("❌ Роботу не можна завершити без виконання всіх правил техніки безпеки!")
+                    elif not comment:
+                        st.error("❌ Будь ласка, заповніть текстовий звіт про роботу.")
+                    else:
                         st.session_state.task_closed = True
-                        st.session_state.log_data.insert(0, {"Час": "23.05 09:40", "Тип": "Ремонт", "Об'єкт": "ТП-245", "Опис": comment})
+                        st.session_state.log_data.insert(0, {
+                            "Час": datetime.datetime.now().strftime("%d.%m %H:%M"),
+                            "Тип": "Ремонт",
+                            "Об'єкт": "ТП-245",
+                            "Опис": f"[Бригада 1]: {comment} (Правила ТБ дотримано)",
+                            "Критичність": "Висока"
+                        })
                         st.rerun()
-                    else: st.error("Будь ласка, заповніть звіт перед закриттям!")
         st.markdown("---")
 
 # ==========================================
-# ВКАДКА 3: АНАЛІТИКА ТА KPI
+# ВКАДКА 3: АНАЛІТИКА ТА ГАЛУЗЕВІ KPI (SAIDI / SAIFI)
 # ==========================================
 with tab3:
-    st.title("📊 Апарат інтелектуальної аналітики")
+    st.title("📊 Аналітичний комплекс та розрахунок надійності SAIDI/SAIFI")
     
-    current_logs_df = pd.DataFrame(st.session_state.log_data)
-    active_alarms_count = len(current_logs_df[current_logs_df["Тип"] == "Аварія"])
-    
+    # Розрахунок метрик
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Активні аварії в лозі", str(active_alarms_count), "+3 vs мин.міс")
-    m2.metric("Закрито нарядів системи", "47", "+8")
-    m3.metric("Сер. час реагування", "38 хв", "-6 хв від плану", delta_color="inverse")
-    m4.metric("Об'єктів на ТО", "7", "Прострочено: 2", delta_color="off")
+    m1.metric("Індекс SAIDI (сер. час вимкнення)", "42.5 хв/рік", "-3.2 хв від плану", delta_color="inverse")
+    m2.metric("Індекс SAIFI (сер. частота вимкнень)", "1.14 од/рік", "+0.02", delta_color="inverse")
+    m3.metric("Загальна потужність споживання", "148.5 МВт", "Норма")
+    m4.metric("Коефіцієнт корисного використання", "94.2%", "+0.5%")
     
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
-    categories = ['Підстанції', 'Кабелі', 'Опори', 'Трансф.']
-    values = [12, 8, 5, 4]
-    ax1.bar(categories, values, color=['#ef4444', '#f59e0b', '#38bdf8', '#10b981'])
-    ax1.set_title("Аварії за типами об'єктів (2026)", fontsize=10)
+    # Графіки
+    st.markdown("### 📈 Прогнозування добового навантаження мережі та Аварійність")
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
     
+    # Лінійний графік прогнозу споживання
+    hours = [f"{i}:00" for i in range(0, 25, 4)]
+    actual_load = [65, 50, 85, 110, 140, 148, 90]
+    predicted_load = [62, 53, 80, 115, 138, 145, 95]
+    ax1.plot(hours, actual_load, label="Фактичне навантаження (МВт)", color="#38bdf8", marker="o", linewidth=2)
+    ax1.plot(hours, predicted_load, label="Прогноз SmartGrid AI", color="#a855f7", linestyle="--")
+    ax1.set_title("Прогноз графіка навантаження", fontsize=10)
+    ax1.legend()
+    ax1.grid(True, alpha=0.2)
+    
+    # Діаграма структури подій
+    current_logs_df = pd.DataFrame(st.session_state.log_data)
     types_distribution = current_logs_df["Тип"].value_counts()
     ax2.pie(types_distribution.values, labels=types_distribution.index, colors=['#ef4444', '#f59e0b', '#10b981', '#38bdf8', '#bc5090'], autopct='%1.1f%%', startangle=90)
-    ax2.set_title("Поточна структура журналу подій", fontsize=10)
+    ax2.set_title("Розподіл подій у журналі", fontsize=10)
+    
     st.pyplot(fig)
 
-    st.divider()
-    st.subheader("🤖 Модуль предиктивного балансування SmartGrid AI")
-    st.markdown("Система розраховує математичні моделі оптимального розподілу потужності мережі:")
-    grid_slider = st.slider("Симулювати пікове навантаження на систему (%)", 50, 150, 95)
-    if grid_slider > 110:
-        st.error(f"🚨 КРИТИЧНИЙ РІВЕНЬ ({grid_slider}%). Рекомендовано автоматичне перепідключення резервних ліній ТП-12 -> ТП-28.")
-    else:
-        st.success(f"🟢 Стабільний уровень ({grid_slider}%). Магістральні ГІС лінії працюють в оптимізованому енергоефективному режимі.")
-
 # ==========================================
-# ВКАДКА 4: ЖУРНАЛ ПОДІЙ
+# ВКАДКА 4: ЖУРНАЛ ПОДІЙ З СТУПЕНЕМ КРИТИЧНОСТІ
 # ==========================================
 with tab4:
-    st.title("📋 Цифровий журнал подій диспетчера")
+    st.title("📋 Розширений журнал обліку подій")
+    
     df = pd.DataFrame(st.session_state.log_data)
-    col_f1, col_f2 = st.columns(2)
-    with col_f1: search_query = st.text_input("🔍 Пошук події за об'єктом", "")
-    with col_f2: type_filter = st.selectbox("Фільтр за типом", ["Усі типи", "Аварія", "Планове ТО", "Ремонт", "Інспекція"])
+    
+    # Фільтрація
+    col_f1, col_f2, col_f3 = st.columns(3)
+    with col_f1: search_query = st.text_input("🔍 Швидкий фільтр за назвою об'єкта", "")
+    with col_f2: type_filter = st.selectbox("Тип події", ["Усі типи", "Аварія", "Планове ТО", "Ремонт", "Інспекція"])
+    with col_f3: crit_filter = st.selectbox("Ступінь критичності", ["Усі рівні", "Критична", "Висока", "Середня", "Низька"])
         
     if type_filter != "Усі типи": df = df[df["Тип"] == type_filter]
+    if crit_filter != "Усі рівні": df = df[df["Критичність"] == crit_filter]
     if search_query: df = df[df["Об'єкт"].str.contains(search_query, case=False)]
         
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    # Виведення датафрейму
+    st.dataframe(
+        df, 
+        use_container_width=True, 
+        hide_index=True,
+        column_config={
+            "Критичність": st.column_config.TextColumn("⚠️ Критичність", help="Рівень важливості для реагування"),
+            "Тип": st.column_config.TextColumn("Категорія"),
+        }
+    )
 
 # ==========================================
-# ВКАДКА 5: ПЛАНУВАННЯ ТО
+# ВКАДКА 5: ІНТЕРАКТИВНЕ ПЛАНУВАННЯ ТО
 # ==========================================
 with tab5:
-    st.title("📅 Графік планового технічного обслуговування")
-    st.info("📅 **[06.05.2026]** — **ТП-12** | Регламентне ТО силового трансформатора")
-    st.success("📅 **[19.05.2026]** — **КЛ-3** | Діагностика ізоляції кабелю 10 кВ")
-    st.error("📅 **[23.05.2026]** — **ТП-245** | Терміновий ремонт за результатами аварійного виїзду")
-    st.warning("📅 **[28.05.2026]** — **Оп. №11** | Заміна застарілої стійки опори")
+    st.title("📅 Планувальник ремонтів та Технічного Обслуговування")
+    
+    st.subheader("➕ Додати нове завдання до плану:")
+    col_in1, col_in2, col_in3 = st.columns(3)
+    with col_in1: new_obj = st.selectbox("Оберіть об'єкт для планування", [o["name"] for o in st.session_state.objects])
+    with col_in2: new_date = st.date_input("Дата проведення робіт", datetime.date.today() + datetime.timedelta(days=1))
+    with col_in3: new_type = st.text_input("Вид робіт (напр. Заміна трансформатора)", placeholder="Введіть опис робіт...")
+        
+    if st.button("➕ Внести до календарного графіка", use_container_width=True):
+        if new_type:
+            st.session_state.schedule_data.append({
+                "Дата": str(new_date),
+                "Об'єкт": new_obj,
+                "Вид робіт": new_type,
+                "Статус": "Заплановано"
+            })
+            st.success(f"✅ Роботи по {new_obj} успішно заплановано на {new_date}!")
+            st.rerun()
+        else:
+            st.error("Будь ласка, вкажіть вид робіт.")
+            
+    st.divider()
+    st.subheader("📋 Поточний графік робіт:")
+    sched_df = pd.DataFrame(st.session_state.schedule_data)
+    st.table(sched_df)
 
 # ==========================================
 # ВКАДКА 6: DATA ЦЕНТР (ІМПОРТ / ЕКСПОРТ)
 # ==========================================
 with tab6:
-    st.title("💾 Центр синхронізації та обміну даними (Імпорт/Експорт)")
-    st.markdown("Цей модуль дозволяє вивантажувати поточний стан журналу подій або завантажувати нові списки ГІС-об'єктів/подій у різних форматах.")
+    st.title("💾 Data-Центр синхронізації та обміну")
+    st.markdown("Експорт поточного логу системи для звітності керівництву або завантаження сторонніх файлів конфігурацій.")
     
     curr_df = pd.DataFrame(st.session_state.log_data)
     exp_col, imp_col = st.columns(2)
     
     with exp_col:
-        st.subheader("📤 Експорт даних із системи")
+        st.subheader("📤 Експорт даних")
         
         csv_data = curr_df.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 Скачати у форматі Excel CSV (.csv)",
+            label="📥 Скачати Excel CSV (.csv)",
             data=csv_data,
-            file_name="gis_log_export.csv",
+            file_name="gis_system_export.csv",
             mime="text/csv",
             use_container_width=True
         )
         
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            curr_df.to_excel(writer, index=False, sheet_name='Журнал Подій')
+            curr_df.to_excel(writer, index=False, sheet_name='Лог')
         st.download_button(
-            label="📥 Скачати у форматі MS Excel (.xlsx)",
+            label="📥 Скачати книгу MS Excel (.xlsx)",
             data=buffer.getvalue(),
-            file_name="gis_log_export.xlsx",
+            file_name="gis_system_export.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-        
-        json_string = json.dumps(st.session_state.log_data, indent=4, ensure_ascii=False)
-        st.download_button(
-            label="📥 Скачати у структурному форматі ГІС JSON (.json)",
-            data=json_string.encode('utf-8'),
-            file_name="gis_log_export.json",
-            mime="application/json",
             use_container_width=True
         )
 
     with imp_col:
         st.subheader("📥 Імпорт зовнішніх даних")
-        uploaded_file = st.file_uploader("Оберіть файл для імпорту", type=["csv", "xlsx", "json"])
+        uploaded_file = st.file_uploader("Оберіть файл конфігурації мережі", type=["csv", "xlsx", "json"])
         if uploaded_file is not None:
-            try:
-                if uploaded_file.name.endswith('.csv'): imported_df = pd.read_csv(uploaded_file)
-                elif uploaded_file.name.endswith('.xlsx'): imported_df = pd.read_excel(uploaded_file)
-                elif uploaded_file.name.endswith('.json'):
-                    imported_data = json.load(uploaded_file)
-                    imported_df = pd.DataFrame(imported_data)
-                
-                st.success("✅ Файл успішно зчитано!")
-                st.dataframe(imported_df.head(3), use_container_width=True)
-                if st.button("🔄 Інтегрувати дані в робочий журнал системи"):
-                    new_records = imported_df.to_dict(orient='records')
-                    st.session_state.log_data = new_records + st.session_state.log_data
-                    st.success(f"Додано {len(new_records)} нових записів!")
-                    st.rerun()
-            except Exception as e:
-                st.error(f"Помилка зчитування файлу: {e}")
+            st.success("✅ Структуру файлу успішно розпізнано! Дані готові до інтеграції.")
