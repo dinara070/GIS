@@ -1,4 +1,6 @@
-streamlit
+streamlit>=1.35.0
 pandas
 matplotlib
 openpyxl
+folium
+streamlit-folium
