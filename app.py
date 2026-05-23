@@ -7,15 +7,145 @@ import datetime
 
 # --- НАЛАШТУВАННЯ СТОРІНКИ ---
 st.set_page_config(
-    page_title="ГІС Диспетчерська Система Регіональних Електромереж v3.0",
+    page_title="ГІС Диспетчерська Система Регіональних Електромереж v4.0",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Темна тема для графіків Matplotlib
 plt.style.use('dark_background')
 
-# --- ІНІЦІАЛІЗАЦІЯ ДАНИХ ОРГСТРУКТУРИ ---
+# ==========================================
+# СИСТЕМА АВТОРИЗАЦІЇ
+# ==========================================
+
+# База користувачів: {логін: {пароль, роль, ім'я}}
+USERS_DB = {
+    "dispatcher": {
+        "password": "disp2026",
+        "role": "dispatcher",
+        "display_name": "Диспетчер Коваленко О.В.",
+        "subdivision": "Центральний диспетчерський пункт"
+    },
+    "admin": {
+        "password": "admin2026",
+        "role": "admin",
+        "display_name": "Адміністратор Петренко І.М.",
+        "subdivision": "ІТ-відділ АТ «Вінницяобленерго»"
+    },
+    "brigade1": {
+        "password": "brigade1",
+        "role": "brigade",
+        "display_name": "Бригадир Сидоренко В.П.",
+        "subdivision": "Бригада №1 (ОВБ Центр)"
+    },
+    "brigade2": {
+        "password": "brigade2",
+        "role": "brigade",
+        "display_name": "Бригадир Мельник Т.С.",
+        "subdivision": "Бригада №2 (Шаргородська дільниця)"
+    },
+}
+
+ROLE_LABELS = {
+    "dispatcher": "👷 Диспетчер",
+    "admin": "🔑 Адміністратор",
+    "brigade": "🪖 Монтер / Мобільна бригада"
+}
+
+# Ініціалізація стану авторизації
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "current_user" not in st.session_state:
+    st.session_state.current_user = None
+if "login_error" not in st.session_state:
+    st.session_state.login_error = ""
+
+def do_login(username: str, password: str):
+    user = USERS_DB.get(username.strip().lower())
+    if user and user["password"] == password:
+        st.session_state.authenticated = True
+        st.session_state.current_user = {
+            "login": username,
+            "role": user["role"],
+            "display_name": user["display_name"],
+            "subdivision": user["subdivision"]
+        }
+        st.session_state.login_error = ""
+    else:
+        st.session_state.login_error = "❌ Невірний логін або пароль. Спробуйте ще раз."
+
+def do_logout():
+    st.session_state.authenticated = False
+    st.session_state.current_user = None
+    st.session_state.login_error = ""
+
+# --- ЕКРАН ЛОГІНА ---
+if not st.session_state.authenticated:
+    col_l, col_center, col_r = st.columns([1, 1.4, 1])
+    with col_center:
+        st.markdown("""
+        <div style='text-align:center; padding: 2rem 0 1rem 0;'>
+            <div style='font-size: 3rem;'>⚡</div>
+            <h2 style='color: #185FA5; margin-bottom: 0;'>АТ «Вінницяобленерго»</h2>
+            <p style='color: #555; font-size: 0.9rem; margin-top: 0.3rem;'>
+                ГІС Диспетчерська Система v4.0 — Вхід до системи
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        with st.container(border=True):
+            st.markdown("### 🔐 Авторизація")
+            username_input = st.text_input("Логін користувача", placeholder="Введіть логін...")
+            password_input = st.text_input("Пароль", type="password", placeholder="Введіть пароль...")
+
+            if st.session_state.login_error:
+                st.error(st.session_state.login_error)
+
+            if st.button("▶️ Увійти до системи", use_container_width=True, type="primary"):
+                do_login(username_input, password_input)
+                st.rerun()
+
+        st.markdown("""
+        <div style='text-align:center; margin-top: 1.5rem;'>
+            <p style='color: #888; font-size: 0.78rem;'>
+                🔒 Система розмежування доступу за ролями.<br>
+                Для отримання облікових даних зверніться до ІТ-відділу.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        with st.expander("ℹ️ Тестові облікові записи (для демо)", expanded=False):
+            st.markdown("""
+            | Логін | Пароль | Роль |
+            |---|---|---|
+            | `dispatcher` | `disp2026` | 👷 Диспетчер |
+            | `admin` | `admin2026` | 🔑 Адміністратор |
+            | `brigade1` | `brigade1` | 🪖 Монтер (Бригада №1) |
+            | `brigade2` | `brigade2` | 🪖 Монтер (Бригада №2) |
+            """)
+
+    st.stop()  # Нічого далі не показуємо без авторизації
+
+# ==========================================
+# АВТОРИЗОВАНИЙ КОРИСТУВАЧ — ДАНІ СЕСІЇ
+# ==========================================
+current_user = st.session_state.current_user
+user_role = current_user["role"]
+
+# --- БІЧНА ПАНЕЛЬ: інфо про користувача ---
+with st.sidebar:
+    st.markdown(f"### {ROLE_LABELS.get(user_role, '👤 Користувач')}")
+    st.markdown(f"**{current_user['display_name']}**")
+    st.markdown(f"*{current_user['subdivision']}*")
+    st.divider()
+    st.markdown(f"🟢 Сеанс активний  \n`{datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}`")
+    if st.button("🚪 Вийти з системи", use_container_width=True):
+        do_logout()
+        st.rerun()
+
+# ==========================================
+# ІНІЦІАЛІЗАЦІЯ ДАНИХ
+# ==========================================
 if "org_structure" not in st.session_state:
     st.session_state.org_structure = {
         "СО «Вінницькі міські ЕМ»": {"база": "м. Вінниця", "дільниці": ["Вінницька міська дільниця"]},
@@ -28,7 +158,6 @@ if "org_structure" not in st.session_state:
         "СО «Тульчинські ЕМ»": {"база": "м. Тульчин", "дільниці": ["Тульчинська", "Крижопільська", "Піщанська", "Томашпільська"]}
     }
 
-# --- ІНІЦІАЛІЗАЦІЯ ГІС ОБ'ЄКТІВ ---
 if "objects" not in st.session_state:
     st.session_state.objects = [
         {"name": "ТП-12", "type": "Підстанція", "status": "Нормальна", "desc": "ВН-110 кВ. Обслуговує: СО Вінницькі міські ЕМ", "latitude": 49.2331, "longitude": 28.4682, "criticality": "Висока", "subdivision": "СО «Вінницькі міські ЕМ»"},
@@ -56,277 +185,350 @@ if "schedule_data" not in st.session_state:
     ]
 
 if "selected_object" not in st.session_state:
-    st.session_state.selected_object = st.session_state.objects[3] # Шаргород за замовчуванням
+    st.session_state.selected_object = st.session_state.objects[3]
 
 if "task_closed" not in st.session_state:
     st.session_state.task_closed = False
 
-# --- ГОЛОВНЕ МЕНЮ ПРОГРАМИ ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    "🏢 Диспетчер мапи", 
-    "📱 Мобільний клієнт",
-    "🏛️ Структура компанії (ЕМ)", 
-    "📊 Аналітика та KPI", 
-    "📋 Журнал подій", 
-    "📅 Планування ТО",
-    "💾 Data Центр"
-])
+# ==========================================
+# ГОЛОВНЕ МЕНЮ — ДИНАМІЧНЕ ЗА РОЛЛЮ
+# ==========================================
+
+# Визначаємо, які вкладки доступні для кожної ролі
+TAB_DEFINITIONS = {
+    "dispatcher_tabs": [
+        ("🏢 Диспетчер мапи", "map"),
+        ("📱 Мобільний клієнт", "mobile"),
+        ("🏛️ Структура компанії", "structure"),
+        ("📊 Аналітика та KPI", "analytics"),
+        ("📋 Журнал подій", "log"),
+        ("📅 Планування ТО", "schedule"),
+    ],
+    "admin_tabs": [
+        ("🏢 Диспетчер мапи", "map"),
+        ("📱 Мобільний клієнт", "mobile"),
+        ("🏛️ Структура компанії", "structure"),
+        ("📊 Аналітика та KPI", "analytics"),
+        ("📋 Журнал подій", "log"),
+        ("📅 Планування ТО", "schedule"),
+        ("💾 Data Центр", "data"),
+        ("👥 Управління доступом", "users"),
+    ],
+    "brigade_tabs": [
+        ("📱 Мобільний клієнт", "mobile"),
+    ],
+}
+
+ROLE_TO_TAB_SET = {
+    "dispatcher": "dispatcher_tabs",
+    "admin": "admin_tabs",
+    "brigade": "brigade_tabs",
+}
+
+active_tab_set_key = ROLE_TO_TAB_SET.get(user_role, "brigade_tabs")
+active_tabs = TAB_DEFINITIONS[active_tab_set_key]
+
+tab_labels = [t[0] for t in active_tabs]
+tab_keys = [t[1] for t in active_tabs]
+
+rendered_tabs = st.tabs(tab_labels)
+tab_map = dict(zip(tab_keys, rendered_tabs))
 
 # ==========================================
-# ВКЛАДКА 1: ДИСПЕТЧЕР МАПИ
+# ВКЛАДКА: ДИСПЕТЧЕР МАПИ
 # ==========================================
-with tab1:
-    st.title("🏢 Оперативний диспетчерський пульт ГІС")
-    col_map, col_side = st.columns([2.3, 1])
-    
-    with col_map:
-        mode = st.radio("🛠️ Шари візуалізації мережі:", ["Стандартний ГІС", "Зони структурних одиниць (СО)"], horizontal=True)
+if "map" in tab_map:
+    with tab_map["map"]:
+        st.title("🏢 Оперативний диспетчерський пульт ГІС")
+        col_map, col_side = st.columns([2.3, 1])
         
-        map_df = pd.DataFrame(st.session_state.objects)
-        st.map(map_df, size=40)
-        
-        st.markdown("##### 🔍 Швидкий вибір ГІС об'єкта області:")
-        obj_names = [o["name"] for o in st.session_state.objects]
-        try:
-            curr_index = obj_names.index(st.session_state.selected_object["name"])
-        except ValueError:
-            curr_index = 0
+        with col_map:
+            mode = st.radio("🛠️ Шари візуалізації мережі:", ["Стандартний ГІС", "Зони структурних одиниць (СО)"], horizontal=True)
+            map_df = pd.DataFrame(st.session_state.objects)
+            st.map(map_df, size=40)
             
-        selected_name = st.selectbox("Оберіть вузол для виведення телеметрії:", obj_names, index=curr_index)
-        
-        for o in st.session_state.objects:
-            if o["name"] == selected_name:
-                st.session_state.selected_object = o
+            st.markdown("##### 🔍 Швидкий вибір ГІС об'єкта області:")
+            obj_names = [o["name"] for o in st.session_state.objects]
+            try:
+                curr_index = obj_names.index(st.session_state.selected_object["name"])
+            except ValueError:
+                curr_index = 0
+                
+            selected_name = st.selectbox("Оберіть вузол для виведення телеметрії:", obj_names, index=curr_index)
+            for o in st.session_state.objects:
+                if o["name"] == selected_name:
+                    st.session_state.selected_object = o
 
-    with col_side:
-        obj = st.session_state.selected_object
-        st.subheader("ℹ️ Телеметрія та Управління")
-        st.markdown(f"### {obj.get('name', 'Невідомий об\'єкт')}")
-        
-        status = obj.get('status', 'Нормальна')
-        if "АВАРІЯ" in status: st.error(f"Статус: {status}")
-        elif "Попередження" in status: st.warning(f"Статус: {status}")
-        else: st.success(f"Статус: {status}")
+        with col_side:
+            obj = st.session_state.selected_object
+            st.subheader("ℹ️ Телеметрія та Управління")
+            st.markdown(f"### {obj.get('name', 'Невідомий об\'єкт')}")
             
-        criticality = obj.get('criticality', 'Середня')
-        st.markdown(f"**Підпорядкування:** `{obj.get('subdivision', 'Центральний апарат')}`")
-        st.markdown(f"**Важливість вузла:** `{criticality}`")
-        st.markdown(f"**Координати:** `{obj.get('latitude', 0.0):.4f}° N, {obj.get('longitude', 0.0):.4f}° E`")
-        st.markdown(f"**Технічні параметри:** {obj.get('desc', 'Немає опису')}")
+            status = obj.get('status', 'Нормальна')
+            if "АВАРІЯ" in status: st.error(f"Статус: {status}")
+            elif "Попередження" in status: st.warning(f"Статус: {status}")
+            else: st.success(f"Статус: {status}")
+                
+            criticality = obj.get('criticality', 'Середня')
+            st.markdown(f"**Підпорядкування:** `{obj.get('subdivision', 'Центральний апарат')}`")
+            st.markdown(f"**Важливість вузла:** `{criticality}`")
+            st.markdown(f"**Координати:** `{obj.get('latitude', 0.0):.4f}° N, {obj.get('longitude', 0.0):.4f}° E`")
+            st.markdown(f"**Технічні параметри:** {obj.get('desc', 'Немає опису')}")
+            
+            st.divider()
+            st.markdown("🎛️ **Команди дистанційного керування:**")
+            if st.button("⚡ Вимкнути фідер (SCADA)", use_container_width=True):
+                st.toast(f"🚨 Сигнал оперативної комутації надіслано на {obj.get('name')}!")
+                st.session_state.log_data.insert(0, {
+                    "Час": datetime.datetime.now().strftime("%d.%m %H:%M"),
+                    "Тип": "Ремонт",
+                    "Об'єкт": obj.get('name'),
+                    "Опис": f"Дистанційне оперативне керування. Оператор: {current_user['display_name']}",
+                    "Критичність": "Висока"
+                })
+                
+            if st.button("📲 Передати наряд черговому майстру дільниці", use_container_width=True):
+                st.toast(f"📡 Дані надіслано в базу відповідної структурної одиниці ЕМ!")
+                
+            permit_text = f"НАРЯД-ДОПУСК №{obj.get('name', 'ТП')}-2026\nОб'єкт: {obj.get('name')} ({obj.get('type')})\nПідрозділ: {obj.get('subdivision')}\nКритичність: {criticality}\nКоординати: {obj.get('latitude')}, {obj.get('longitude')}\nОпис: {obj.get('desc')}\nВидав: {current_user['display_name']}\nЗгенеровано системою Вінницяобленерго."
+            st.download_button(
+                label="📄 Завантажити Наряд-Допуск (.txt)",
+                data=permit_text,
+                file_name=f"permit_{obj.get('name', 'TP')}.txt",
+                mime="text/plain",
+                use_container_width=True
+            )
+
+# ==========================================
+# ВКЛАДКА: МОБІЛЬНИЙ КЛІЄНТ
+# ==========================================
+if "mobile" in tab_map:
+    with tab_map["mobile"]:
+        st.title("📱 Цифровий кабінет лінійної бригади")
+        _, phone_col, _ = st.columns([1, 2, 1])
+        with phone_col:
+            st.markdown("---")
+            st.markdown("<h3 style='text-align: center; color: #185FA5;'>📱 Мобільна бригада АТ «Вінницяобленерго»</h3>", unsafe_allow_html=True)
+            st.info(f"👷 {current_user['display_name']} | GPS: Активний")
+            
+            if st.session_state.task_closed:
+                st.success("🎉 Наряд успішно закрито та підписано ЕЦП!")
+                if st.button("🔄 Оновити стрічку завдань"):
+                    st.session_state.task_closed = False
+                    st.rerun()
+            else:
+                st.warning("📋 **Поточна задача СО «Жмеринські ЕМ» (Шаргородська дільниця):**")
+                st.markdown("**Об'єкт:** ТП-Шаргород-100  \n**Завдання:** Планова діагностика шин та огляд вимикачів лінії.")
+                
+                tb_1 = st.checkbox("Заземлення встановлено")
+                tb_2 = st.checkbox("Плакати з техніки безпеки розвішано")
+                
+                comment = st.text_area("Звіт про виконану роботу:")
+                if st.button("🚀 Закрити наряд-допуск", use_container_width=True):
+                    if tb_1 and tb_2 and comment:
+                        st.session_state.task_closed = True
+                        st.session_state.log_data.insert(0, {
+                            "Час": datetime.datetime.now().strftime("%d.%m %H:%M"),
+                            "Тип": "Планове ТО",
+                            "Об'єкт": "ТП-Шаргород-100",
+                            "Опис": f"[{current_user['display_name']}]: {comment}",
+                            "Критичність": "Висока"
+                        })
+                        st.rerun()
+                    else: st.error("Заповніть чек-лист безпеки та коментар!")
+            st.markdown("---")
+
+# ==========================================
+# ВКЛАДКА: СТРУКТУРА КОМПАНІЇ
+# ==========================================
+if "structure" in tab_map:
+    with tab_map["structure"]:
+        st.title("🏛️ Організаційна структура та зони обслуговування АТ «Вінницяобленерго»")
+        st.markdown("Розподіл компанії за напрямками на базі адміністративних районів області:")
+        
+        col_str, col_shargorod = st.columns([1.8, 1.2])
+        
+        with col_str:
+            st.subheader("📁 Структурні Одиниці (СО)")
+            for em, info in st.session_state.org_structure.items():
+                with st.expander(f"📌 {em} (База: {info['база']})"):
+                    st.markdown("**Зона обслуговування (Покриття дільниць):**")
+                    for sub in info["дільниці"]:
+                        st.write(f"• {sub} дільниця")
+                        
+        with col_shargorod:
+            st.subheader("📍 Особливий статус: Шаргородський регіон")
+            st.info("ℹ️ Шаргород та колишній Шаргородський район повністю охоплюються АТ «Вінницяобленерго». Адміністративно Шаргородська дільниця входить до складу структури СО «Жмеринські електричні мережі».")
+            
+            box_sh = st.container(border=True)
+            box_sh.markdown("### 🏢 Безпосередньо у місті Шаргород діють:")
+            box_sh.markdown("""
+            * **🔧 Шаргородська дільниця** — технічне обслуговування мереж, поточний та капітальний ремонт ліній і підстанцій.
+            * **👥 Центр обслуговування клієнтів (ЦОК)** — прийом споживачів з питань нових приєднань, технічних умов, встановлення лічильників та договірної документації.
+            """)
+            
+            st.caption("🗺️ Локація сервісної інфраструктури в м. Шаргород:")
+            sh_df = pd.DataFrame([
+                {"name": "ТП-Шаргород-100", "latitude": 48.7364, "longitude": 28.0822},
+                {"name": "ЦОК Шаргород", "latitude": 48.7390, "longitude": 28.0805}
+            ])
+            st.map(sh_df, zoom=13, size=45)
+
+# ==========================================
+# ВКЛАДКА: АНАЛІТИКА ТА KPI
+# ==========================================
+if "analytics" in tab_map:
+    with tab_map["analytics"]:
+        st.title("📊 Апарат інтелектуальної аналітики")
+        
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Індекс надійності SAIDI", "42.5 хв/рік", "-3.2 хв від плану", delta_color="inverse")
+        m2.metric("Індекс частоти вимкнень SAIFI", "1.14 од/рік", "+0.02", delta_color="inverse")
+        m3.metric("Загальна потужність споживання", "148.5 МВт", "Норма")
+        m4.metric("Коефіцієнт корисного використання", "94.2%", "+0.5%")
+        
+        st.markdown("### 📈 Прогнозування добового навантаження мережі та Аварійність")
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
+        
+        hours = [f"{i}:00" for i in range(0, 25, 4)]
+        actual_load = [65, 50, 85, 110, 140, 148, 90]
+        predicted_load = [62, 53, 80, 115, 138, 145, 95]
+        ax1.plot(hours, actual_load, label="Фактичне навантаження (МВт)", color="#38bdf8", marker="o", linewidth=2)
+        ax1.plot(hours, predicted_load, label="Прогноз SmartGrid AI", color="#a855f7", linestyle="--")
+        ax1.set_title("Прогноз графіка навантаження", fontsize=10)
+        ax1.legend()
+        ax1.grid(True, alpha=0.2)
+        
+        current_logs_df = pd.DataFrame(st.session_state.log_data)
+        types_distribution = current_logs_df["Тип"].value_counts()
+        ax2.pie(types_distribution.values, labels=types_distribution.index, colors=['#ef4444', '#f59e0b', '#10b981', '#38bdf8', '#bc5090'], autopct='%1.1f%%', startangle=90)
+        ax2.set_title("Розподіл подій у журналі", fontsize=10)
+        st.pyplot(fig)
+
+# ==========================================
+# ВКЛАДКА: ЖУРНАЛ ПОДІЙ
+# ==========================================
+if "log" in tab_map:
+    with tab_map["log"]:
+        st.title("📋 Цифровий журнал подій диспетчера")
+        
+        df = pd.DataFrame(st.session_state.log_data)
+        
+        col_f1, col_f2, col_f3 = st.columns(3)
+        with col_f1: search_query = st.text_input("🔍 Швидкий фільтр за назвою об'єкта", "")
+        with col_f2: type_filter = st.selectbox("Тип події", ["Усі типи", "Аварія", "Планове ТО", "Ремонт", "Інспекція"])
+        with col_f3: crit_filter = st.selectbox("Ступінь критичності", ["Усі рівні", "Критична", "Висока", "Середня", "Низька"])
+            
+        if type_filter != "Усі типи": df = df[df["Тип"] == type_filter]
+        if crit_filter != "Усі рівні" and "Критичність" in df.columns: df = df[df["Критичність"] == crit_filter]
+        if search_query: df = df[df["Об'єкт"].str.contains(search_query, case=False)]
+            
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+# ==========================================
+# ВКЛАДКА: ПЛАНУВАННЯ ТО
+# ==========================================
+if "schedule" in tab_map:
+    with tab_map["schedule"]:
+        st.title("📅 Графік планового технічного обслуговування")
+        
+        st.subheader("➕ Додати нове завдання до плану:")
+        col_in1, col_in2, col_in3 = st.columns(3)
+        with col_in1: plan_obj = st.selectbox("Вузол для ТО:", [o["name"] for o in st.session_state.objects])
+        with col_in2: plan_date = st.date_input("Дата робіт", datetime.date.today() + datetime.timedelta(days=1))
+        with col_in3: plan_desc = st.text_input("Опис регламентних робіт:", placeholder="Введіть опис робіт...")
+            
+        if st.button("➕ Додати до графіка робіт", use_container_width=True):
+            if plan_desc:
+                st.session_state.schedule_data.append({
+                    "Дата": str(plan_date),
+                    "Об'єкт": plan_obj,
+                    "Вид робіт": plan_desc,
+                    "Статус": "Заплановано"
+                })
+                st.success(f"✅ Роботи по {plan_obj} успішно додано!")
+                st.rerun()
+            else:
+                st.error("Будь ласка, вкажіть вид робіт.")
+                
+        st.divider()
+        st.subheader("📋 Поточний графік робіт:")
+        st.table(pd.DataFrame(st.session_state.schedule_data))
+
+# ==========================================
+# ВКЛАДКА: DATA ЦЕНТР (тільки Адмін)
+# ==========================================
+if "data" in tab_map:
+    with tab_map["data"]:
+        st.title("💾 Data-Центр синхронізації та обміну (Імпорт/Експорт)")
+        
+        curr_df = pd.DataFrame(st.session_state.log_data)
+        exp_col, imp_col = st.columns(2)
+        
+        with exp_col:
+            st.subheader("📤 Експорт даних із системи")
+            
+            csv_data = curr_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Скачати Excel CSV (.csv)",
+                data=csv_data,
+                file_name="vinnitsaoblenergo_export.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+            
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                curr_df.to_excel(writer, index=False, sheet_name='Журнал Подій')
+            st.download_button(
+                label="📥 Скачати книгу MS Excel (.xlsx)",
+                data=buffer.getvalue(),
+                file_name="vinnitsaoblenergo_export.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+
+        with imp_col:
+            st.subheader("📥 Імпорт зовнішніх даних")
+            uploaded_file = st.file_uploader("Оберіть файл конфігурації мережі", type=["csv", "xlsx", "json"])
+            if uploaded_file is not None:
+                st.success("✅ Структуру файлу успішно розпізнано! Дані готові до інтеграції.")
+
+# ==========================================
+# ВКЛАДКА: УПРАВЛІННЯ ДОСТУПОМ (тільки Адмін)
+# ==========================================
+if "users" in tab_map:
+    with tab_map["users"]:
+        st.title("👥 Управління правами доступу користувачів")
+        st.info("ℹ️ Ця вкладка доступна виключно адміністраторам системи.")
+        
+        st.subheader("📋 Поточні облікові записи системи")
+        
+        users_display = []
+        for login, data in USERS_DB.items():
+            users_display.append({
+                "Логін": login,
+                "Ім'я та посада": data["display_name"],
+                "Підрозділ": data["subdivision"],
+                "Роль": ROLE_LABELS.get(data["role"], data["role"]),
+                "Доступні вкладки": ", ".join(
+                    t[0] for t in TAB_DEFINITIONS[ROLE_TO_TAB_SET.get(data["role"], "brigade_tabs")]
+                )
+            })
+        
+        st.dataframe(pd.DataFrame(users_display), use_container_width=True, hide_index=True)
         
         st.divider()
-        st.markdown("🎛️ **Команди дистанційного керування:**")
-        if st.button("⚡ Вимкнути фідер (SCADA)", use_container_width=True):
-            st.toast(f"🚨 Сигнал оперативної комутації надіслано на {obj.get('name')}!")
-            st.session_state.log_data.insert(0, {
-                "Час": datetime.datetime.now().strftime("%d.%m %H:%M"),
-                "Тип": "Ремонт",
-                "Об'єкт": obj.get('name'),
-                "Опис": f"Дистанційне оперативне керування комутаційним апаратом з пульта.",
-                "Критичність": "Висока"
-            })
-            
-        if st.button("📲 Передати наряд черговому майстру дільниці", use_container_width=True):
-            st.toast(f"📡 Дані надіслано в базу відповідної структурної одиниці ЕМ!")
-            
-        permit_text = f"НАРЯД-ДОПУСК №{obj.get('name', 'ТП')}-2026\nОб'єкт: {obj.get('name')} ({obj.get('type')})\nПідрозділ: {obj.get('subdivision')}\nКритичність: {criticality}\nКоординати: {obj.get('latitude')}, {obj.get('longitude')}\nОпис: {obj.get('desc')}\nЗгенеровано системою Вінницяобленерго."
-        st.download_button(
-            label="📄 Завантажити Наряд-Допуск (.txt)",
-            data=permit_text,
-            file_name=f"permit_{obj.get('name', 'TP')}.txt",
-            mime="text/plain",
-            use_container_width=True
-        )
-
-# ==========================================
-# ВКАДКА 2: МОБІЛЬНИЙ КЛІЄНТ
-# ==========================================
-with tab2:
-    st.title("📱 Цифровий кабінет лінійної бригади")
-    _, phone_col, _ = st.columns([1, 2, 1])
-    with phone_col:
-        st.markdown("---")
-        st.markdown("<h3 style='text-align: center; color: #185FA5;'>📱 Мобільна бригада АТ «Вінницяобленерго»</h3>", unsafe_allow_html=True)
-        st.info("👷 Бригада №1 (ОВБ Центр) | GPS: Активний")
+        st.subheader("🔐 Матриця доступу за ролями")
         
-        if st.session_state.task_closed:
-            st.success("🎉 Наряд успішно закрито та підписано ЕЦП!")
-            if st.button("🔄 Оновити стрічку завдань"):
-                st.session_state.task_closed = False
-                st.rerun()
-        else:
-            st.warning("📋 **Поточна задача СО «Жмеринські ЕМ» (Шаргородська дільниця):**")
-            st.markdown("**Об'єкт:** ТП-Шаргород-100  \n**Завдання:** Планова діагностика шин та огляд вимикачів лінії.")
-            
-            tb_1 = st.checkbox("Заземлення встановлено")
-            tb_2 = st.checkbox("Плакати з техніки безпеки розвішано")
-            
-            comment = st.text_area("Звіт про виконану роботу:")
-            if st.button("🚀 Закрити наряд-допуск", use_container_width=True):
-                if tb_1 and tb_2 and comment:
-                    st.session_state.task_closed = True
-                    st.session_state.log_data.insert(0, {
-                        "Час": datetime.datetime.now().strftime("%d.%m %H:%M"),
-                        "Тип": "Планове ТО",
-                        "Об'єкт": "ТП-Шаргород-100",
-                        "Опис": f"[Шаргородська дільниця]: {comment}",
-                        "Критичність": "Висока"
-                    })
-                    st.rerun()
-                else: st.error("Заповніть чек-лист безпеки та коментар!")
-        st.markdown("---")
-
-# ==========================================
-# ВКАДКА 3: СТРУКТУРА КОМПАНІЇ (ЕМ та ДІЛЬНИЦІ)
-# ==========================================
-with tab3:
-    st.title("🏛️ Організаційна структура та зони обслуговування АТ «Вінницяобленерго»")
-    st.markdown("Розподіл компанії за напрямками на базі адміністративних районів області:")
-    
-    col_str, col_shargorod = st.columns([1.8, 1.2])
-    
-    with col_str:
-        st.subheader("📁 Структурні Одиниці (СО)")
-        for em, info in st.session_state.org_structure.items():
-            with st.expander(f"📌 {em} (База: {info['база']})"):
-                st.markdown("**Зона обслуговування (Покриття дільниць):**")
-                for sub in info["дільниці"]:
-                    st.write(f"• {sub} дільниця")
-                    
-    with col_shargorod:
-        st.subheader("📍 Особливий статус: Шаргородський регіон")
-        st.info("ℹ️ Шаргород та колишній Шаргородський район повністю охоплюються АТ «Вінницяобленерго». Адміністративно Шаргородська дільниця входить до складу структури СО «Жмеринські електричні мережі», оскільки Жмеринка є більшим опорним вузлом для цього регіону.")
+        matrix_data = []
+        all_tabs = list(dict.fromkeys(t[0] for tabs in TAB_DEFINITIONS.values() for t in tabs))
+        for role_key, role_label in ROLE_LABELS.items():
+            tab_set_key = ROLE_TO_TAB_SET.get(role_key, "brigade_tabs")
+            role_tabs = [t[0] for t in TAB_DEFINITIONS[tab_set_key]]
+            row = {"Роль": role_label}
+            for tab in all_tabs:
+                row[tab] = "✅" if tab in role_tabs else "🚫"
+            matrix_data.append(row)
         
-        box_sh = st.container(border=True)
-        box_sh.markdown("### 🏢 Безпосередньо у місті Шаргород діють:")
-        box_sh.markdown("""
-        * **🔧 Шаргородська дільниця** — відповідає за технічне обслуговування мереж, поточний та капітальний ремонт ліній і підстанцій у межах громади.
-        * **👥 Центр обслуговування клієнтів (ЦОК)** — розташований безпосередньо у місті Шаргород. Здійснює фізичний прийом споживачів (фізичних та юридичних осіб) для вирішення питань щодо:
-          * Нових приєднань до мереж
-          * Отримання технічних умов (ТУ)
-          * Встановлення та параметризації лічильників
-          * Узгодження договірної документації
-        """)
-        
-        st.caption("🗺️ Локація сервісної інфраструктури в м. Шаргород:")
-        sh_df = pd.DataFrame([
-            {"name": "ТП-Шаргород-100", "latitude": 48.7364, "longitude": 28.0822},
-            {"name": "ЦОК Шаргород", "latitude": 48.7390, "longitude": 28.0805}
-        ])
-        st.map(sh_df, zoom=13, size=45)
-
-# ==========================================
-# ВКАДКА 4: АНАЛІТИКА ТА KPI
-# ==========================================
-with tab4:
-    st.title("📊 Апарат інтелектуальної аналітики")
-    
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Індекс надійності SAIDI", "42.5 хв/рік", "-3.2 хв від плану", delta_color="inverse")
-    m2.metric("Індекс частоти вимкнень SAIFI", "1.14 од/рік", "+0.02", delta_color="inverse")
-    m3.metric("Загальна потужність споживання області", "148.5 МВт", "Норма")
-    m4.metric("Коефіцієнт корисного використання", "94.2%", "+0.5%")
-    
-    st.markdown("### 📈 Прогнозування добового навантаження мережі та Аварійність")
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
-    
-    hours = [f"{i}:00" for i in range(0, 25, 4)]
-    actual_load = [65, 50, 85, 110, 140, 148, 90]
-    predicted_load = [62, 53, 80, 115, 138, 145, 95]
-    ax1.plot(hours, actual_load, label="Фактичне навантаження (МВт)", color="#38bdf8", marker="o", linewidth=2)
-    ax1.plot(hours, predicted_load, label="Прогноз SmartGrid AI", color="#a855f7", linestyle="--")
-    ax1.set_title("Прогноз графіка навантаження", fontsize=10)
-    ax1.legend()
-    ax1.grid(True, alpha=0.2)
-    
-    current_logs_df = pd.DataFrame(st.session_state.log_data)
-    types_distribution = current_logs_df["Тип"].value_counts()
-    ax2.pie(types_distribution.values, labels=types_distribution.index, colors=['#ef4444', '#f59e0b', '#10b981', '#38bdf8', '#bc5090'], autopct='%1.1f%%', startangle=90)
-    ax2.set_title("Розподіл подій у журналі", fontsize=10)
-    st.pyplot(fig)
-
-# ==========================================
-# ВКАДКА 5: ЖУРНАЛ ПОДІЙ
-# ==========================================
-with tab5:
-    st.title("📋 Цифровий журнал подій диспетчера")
-    
-    df = pd.DataFrame(st.session_state.log_data)
-    
-    col_f1, col_f2, col_f3 = st.columns(3)
-    with col_f1: search_query = st.text_input("🔍 Швидкий фільтр за назвою об'єкта", "")
-    with col_f2: type_filter = st.selectbox("Тип події", ["Усі типи", "Аварія", "Планове ТО", "Ремонт", "Інспекція"])
-    with col_f3: crit_filter = st.selectbox("Ступінь критичності", ["Усі рівні", "Критична", "Висока", "Середня", "Низька"])
-        
-    if type_filter != "Усі типи": df = df[df["Тип"] == type_filter]
-    if crit_filter != "Усі рівні" and "Критичність" in df.columns: df = df[df["Критичність"] == crit_filter]
-    if search_query: df = df[df["Об'єкт"].str.contains(search_query, case=False)]
-        
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-# ==========================================
-# ВКАДКА 6: ПЛАНУВАННЯ ТО
-# ==========================================
-with tab6:
-    st.title("📅 Графік планового технічного обслуговування")
-    
-    st.subheader("➕ Додати нове завдання до плану:")
-    col_in1, col_in2, col_in3 = st.columns(3)
-    with col_in1: plan_obj = st.selectbox("Вузол для ТО:", [o["name"] for o in st.session_state.objects])
-    with col_in2: plan_date = st.date_input("Дата робіт", datetime.date.today() + datetime.timedelta(days=1))
-    with col_in3: plan_desc = st.text_input("Опис регламентних робіт:", placeholder="Введіть опис робіт...")
-        
-    if st.button("➕ Додати до графіка робіт", use_container_width=True):
-        if plan_desc:
-            st.session_state.schedule_data.append({
-                "Дата": str(plan_date), 
-                "Об'єкт": plan_obj, 
-                "Вид робіт": plan_desc, 
-                "Статус": "Заплановано"
-            })
-            st.success(f"✅ Роботи по {plan_obj} успішно додано!")
-            st.rerun()
-        else:
-            st.error("Будь ласка, вкажіть вид робіт.")
-            
-    st.divider()
-    st.subheader("📋 Поточний графік робіт:")
-    st.table(pd.DataFrame(st.session_state.schedule_data))
-
-# ==========================================
-# ВКАДКА 7: DATA ЦЕНТР
-# ==========================================
-with tab7:
-    st.title("💾 Data-Центр синхронізації та обміну (Імпорт/Експорт)")
-    
-    curr_df = pd.DataFrame(st.session_state.log_data)
-    exp_col, imp_col = st.columns(2)
-    
-    with exp_col:
-        st.subheader("📤 Експорт даних із системи")
-        
-        csv_data = curr_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Скачати Excel CSV (.csv)",
-            data=csv_data,
-            file_name="vinnitsaoblenergo_export.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-        
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            curr_df.to_excel(writer, index=False, sheet_name='Журнал Подій')
-        st.download_button(
-            label="📥 Скачати книгу MS Excel (.xlsx)",
-            data=buffer.getvalue(),
-            file_name="vinnitsaoblenergo_export.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-
-    with imp_col:
-        st.subheader("📥 Імпорт зовнішніх даних")
-        uploaded_file = st.file_uploader("Оберіть файл конфігурації мережі", type=["csv", "xlsx", "json"])
-        if uploaded_file is not None:
-            st.success("✅ Структуру файлу успішно розпізнано! Дані готові до інтеграції.")
+        st.dataframe(pd.DataFrame(matrix_data).set_index("Роль"), use_container_width=True)
