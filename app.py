@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import json
 import io
 import datetime
+import random as _rnd
 
 try:
     import folium
@@ -12,7 +13,6 @@ try:
 except ImportError:
     FOLIUM_AVAILABLE = False
 
-# --- НАЛАШТУВАННЯ СТОРІНКИ ---
 st.set_page_config(
     page_title="ГІС Диспетчерська Система Регіональних Електромереж v5.0",
     layout="wide",
@@ -24,8 +24,6 @@ plt.style.use('dark_background')
 # ==========================================
 # СИСТЕМА АВТОРИЗАЦІЇ
 # ==========================================
-
-# База користувачів: {логін: {пароль, роль, ім'я}}
 USERS_DB = {
     "dispatcher": {
         "password": "disp2026",
@@ -59,7 +57,6 @@ ROLE_LABELS = {
     "brigade": "🪖 Монтер / Мобільна бригада"
 }
 
-# Ініціалізація стану авторизації
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 if "current_user" not in st.session_state:
@@ -67,15 +64,13 @@ if "current_user" not in st.session_state:
 if "login_error" not in st.session_state:
     st.session_state.login_error = ""
 
-def do_login(username: str, password: str):
+def do_login(username, password):
     user = USERS_DB.get(username.strip().lower())
     if user and user["password"] == password:
         st.session_state.authenticated = True
         st.session_state.current_user = {
-            "login": username,
-            "role": user["role"],
-            "display_name": user["display_name"],
-            "subdivision": user["subdivision"]
+            "login": username, "role": user["role"],
+            "display_name": user["display_name"], "subdivision": user["subdivision"]
         }
         st.session_state.login_error = ""
     else:
@@ -86,7 +81,6 @@ def do_logout():
     st.session_state.current_user = None
     st.session_state.login_error = ""
 
-# --- ЕКРАН ЛОГІНА ---
 if not st.session_state.authenticated:
     col_l, col_center, col_r = st.columns([1, 1.4, 1])
     with col_center:
@@ -95,23 +89,19 @@ if not st.session_state.authenticated:
             <div style='font-size: 3rem;'>⚡</div>
             <h2 style='color: #185FA5; margin-bottom: 0;'>АТ «Вінницяобленерго»</h2>
             <p style='color: #555; font-size: 0.9rem; margin-top: 0.3rem;'>
-                ГІС Диспетчерська Система v4.0 — Вхід до системи
+                ГІС Диспетчерська Система v5.0 — Вхід до системи
             </p>
         </div>
         """, unsafe_allow_html=True)
-
         with st.container(border=True):
             st.markdown("### 🔐 Авторизація")
             username_input = st.text_input("Логін користувача", placeholder="Введіть логін...")
             password_input = st.text_input("Пароль", type="password", placeholder="Введіть пароль...")
-
             if st.session_state.login_error:
                 st.error(st.session_state.login_error)
-
             if st.button("▶️ Увійти до системи", use_container_width=True, type="primary"):
                 do_login(username_input, password_input)
                 st.rerun()
-
         st.markdown("""
         <div style='text-align:center; margin-top: 1.5rem;'>
             <p style='color: #888; font-size: 0.78rem;'>
@@ -120,7 +110,6 @@ if not st.session_state.authenticated:
             </p>
         </div>
         """, unsafe_allow_html=True)
-
         with st.expander("ℹ️ Тестові облікові записи (для демо)", expanded=False):
             st.markdown("""
             | Логін | Пароль | Роль |
@@ -130,16 +119,11 @@ if not st.session_state.authenticated:
             | `brigade1` | `brigade1` | 🪖 Монтер (Бригада №1) |
             | `brigade2` | `brigade2` | 🪖 Монтер (Бригада №2) |
             """)
+    st.stop()
 
-    st.stop()  # Нічого далі не показуємо без авторизації
-
-# ==========================================
-# АВТОРИЗОВАНИЙ КОРИСТУВАЧ — ДАНІ СЕСІЇ
-# ==========================================
 current_user = st.session_state.current_user
 user_role = current_user["role"]
 
-# --- БІЧНА ПАНЕЛЬ: інфо про користувача ---
 with st.sidebar:
     st.markdown(f"### {ROLE_LABELS.get(user_role, '👤 Користувач')}")
     st.markdown(f"**{current_user['display_name']}**")
@@ -193,78 +177,47 @@ if "schedule_data" not in st.session_state:
 
 if "selected_object" not in st.session_state:
     st.session_state.selected_object = st.session_state.objects[3]
-
 if "task_closed" not in st.session_state:
     st.session_state.task_closed = False
 
 # ==========================================
-# ГОЛОВНЕ МЕНЮ — ДИНАМІЧНЕ ЗА РОЛЛЮ
+# ГОЛОВНЕ МЕНЮ
 # ==========================================
-
-# Визначаємо, які вкладки доступні для кожної ролі
 TAB_DEFINITIONS = {
     "dispatcher_tabs": [
-        ("🏠 Головна", "home"),
-        ("🗺️ Диспетчер мапи", "map"),
-        ("📱 Мобільний клієнт", "mobile"),
-        ("🏛️ Структура компанії", "structure"),
-        ("📊 Аналітика та KPI", "analytics"),
-        ("📋 Журнал подій", "log"),
-        ("📅 Планування ТО", "schedule"),
+        ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"), ("📱 Мобільний клієнт", "mobile"),
+        ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
+        ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
     ],
     "admin_tabs": [
-        ("🏠 Головна", "home"),
-        ("🗺️ Диспетчер мапи", "map"),
-        ("📱 Мобільний клієнт", "mobile"),
-        ("🏛️ Структура компанії", "structure"),
-        ("📊 Аналітика та KPI", "analytics"),
-        ("📋 Журнал подій", "log"),
-        ("📅 Планування ТО", "schedule"),
-        ("💾 Data Центр", "data"),
-        ("👥 Управління доступом", "users"),
+        ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"), ("📱 Мобільний клієнт", "mobile"),
+        ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
+        ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
+        ("💾 Data Центр", "data"), ("👥 Управління доступом", "users"),
     ],
     "brigade_tabs": [
-        ("🏠 Головна", "home"),
-        ("📱 Мобільний клієнт", "mobile"),
+        ("🏠 Головна", "home"), ("📱 Мобільний клієнт", "mobile"),
     ],
 }
-
-ROLE_TO_TAB_SET = {
-    "dispatcher": "dispatcher_tabs",
-    "admin": "admin_tabs",
-    "brigade": "brigade_tabs",
-}
-
-active_tab_set_key = ROLE_TO_TAB_SET.get(user_role, "brigade_tabs")
-active_tabs = TAB_DEFINITIONS[active_tab_set_key]
-
+ROLE_TO_TAB_SET = {"dispatcher": "dispatcher_tabs", "admin": "admin_tabs", "brigade": "brigade_tabs"}
+active_tabs = TAB_DEFINITIONS[ROLE_TO_TAB_SET.get(user_role, "brigade_tabs")]
 tab_labels = [t[0] for t in active_tabs]
-tab_keys = [t[1] for t in active_tabs]
-
+tab_keys   = [t[1] for t in active_tabs]
 rendered_tabs = st.tabs(tab_labels)
 tab_map = dict(zip(tab_keys, rendered_tabs))
 
 # ==========================================
 # ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ FOLIUM ГІС
 # ==========================================
-
-# Кольори маркерів за статусом об'єкта
-def get_marker_color(status: str) -> str:
-    if "АВАРІЯ" in status:   return "red"
-    if "Попередження" in status: return "orange"
+def get_marker_color(status):
+    if "АВАРІЯ" in status:        return "red"
+    if "Попередження" in status:  return "orange"
     return "green"
 
-# Іконки за типом об'єкта
-def get_marker_icon(obj_type: str) -> str:
-    icons = {
-        "Підстанція":       "bolt",
-        "Опора":            "map-pin",
-        "Центр клієнтів":   "users",
-    }
-    return icons.get(obj_type, "circle-info")
+def get_marker_icon(obj_type):
+    return {"Підстанція": "bolt", "Опора": "map-pin", "Центр клієнтів": "users"}.get(obj_type, "circle-info")
 
-# HTML-рядок для pop-up вікна
-def build_popup_html(obj: dict) -> str:
+def build_popup_html(obj):
     status = obj.get("status", "Нормальна")
     color_map = {"АВАРІЯ": "#ef4444", "Попередження": "#f59e0b", "Нормальна": "#10b981"}
     badge_color = next((v for k, v in color_map.items() if k in status), "#10b981")
@@ -275,171 +228,69 @@ def build_popup_html(obj: dict) -> str:
                    padding:1px 7px;font-size:11px">{status}</span>
       <hr style="margin:6px 0">
       <table style="width:100%;font-size:12px;border-collapse:collapse">
-        <tr><td style="color:#666;padding:2px 0">Тип:</td>
-            <td><b>{obj.get('type','—')}</b></td></tr>
-        <tr><td style="color:#666;padding:2px 0">Критичність:</td>
-            <td><b>{obj.get('criticality','—')}</b></td></tr>
-        <tr><td style="color:#666;padding:2px 0">СО:</td>
-            <td>{obj.get('subdivision','—')}</td></tr>
+        <tr><td style="color:#666;padding:2px 0">Тип:</td><td><b>{obj.get('type','—')}</b></td></tr>
+        <tr><td style="color:#666;padding:2px 0">Критичність:</td><td><b>{obj.get('criticality','—')}</b></td></tr>
+        <tr><td style="color:#666;padding:2px 0">СО:</td><td>{obj.get('subdivision','—')}</td></tr>
         <tr><td style="color:#666;padding:2px 0;vertical-align:top">Опис:</td>
             <td style="color:#333">{obj.get('desc','—')}</td></tr>
         <tr><td style="color:#666;padding:2px 0">Координати:</td>
             <td>{obj.get('latitude',0):.4f}° N, {obj.get('longitude',0):.4f}° E</td></tr>
       </table>
-    </div>
-    """
+    </div>"""
 
-# Побудова Folium-карти
-def build_folium_map(objects: list, active_layers: list) -> "folium.Map":
-    # Центр — Вінницька область
-    fmap = folium.Map(
-        location=[49.0, 28.4],
-        zoom_start=8,
-        tiles="CartoDB dark_matter"
-    )
-
-    # ---- ШАР: Зони обслуговування СО (приблизні полігони) ----
+def build_folium_map(objects, active_layers):
+    fmap = folium.Map(location=[49.0, 28.4], zoom_start=8, tiles="CartoDB dark_matter")
     if "Зони СО" in active_layers:
         SO_ZONES = [
-            {
-                "name": "СО «Вінницькі міські ЕМ»",
-                "color": "#38bdf8",
-                "coords": [
-                    [49.28, 28.35], [49.28, 28.58],
-                    [49.18, 28.58], [49.18, 28.35]
-                ]
-            },
-            {
-                "name": "СО «Жмеринські ЕМ» (вкл. Шаргород)",
-                "color": "#a855f7",
-                "coords": [
-                    [48.85, 27.75], [48.85, 28.25],
-                    [48.60, 28.25], [48.60, 27.75]
-                ]
-            },
-            {
-                "name": "СО «Хмільницькі ЕМ»",
-                "color": "#f59e0b",
-                "coords": [
-                    [49.60, 28.35], [49.60, 28.75],
-                    [49.35, 28.75], [49.35, 28.35]
-                ]
-            },
-            {
-                "name": "СО «Гайсинські ЕМ»",
-                "color": "#10b981",
-                "coords": [
-                    [48.95, 29.25], [48.95, 29.75],
-                    [48.65, 29.75], [48.65, 29.25]
-                ]
-            },
+            {"name": "СО «Вінницькі міські ЕМ»", "color": "#38bdf8",
+             "coords": [[49.28,28.35],[49.28,28.58],[49.18,28.58],[49.18,28.35]]},
+            {"name": "СО «Жмеринські ЕМ» (вкл. Шаргород)", "color": "#a855f7",
+             "coords": [[48.85,27.75],[48.85,28.25],[48.60,28.25],[48.60,27.75]]},
+            {"name": "СО «Хмільницькі ЕМ»", "color": "#f59e0b",
+             "coords": [[49.60,28.35],[49.60,28.75],[49.35,28.75],[49.35,28.35]]},
+            {"name": "СО «Гайсинські ЕМ»", "color": "#10b981",
+             "coords": [[48.95,29.25],[48.95,29.75],[48.65,29.75],[48.65,29.25]]},
         ]
         zone_group = folium.FeatureGroup(name="🗺️ Зони обслуговування СО", show=True)
         for zone in SO_ZONES:
-            folium.Polygon(
-                locations=zone["coords"],
-                color=zone["color"],
-                fill=True,
-                fill_color=zone["color"],
-                fill_opacity=0.10,
-                weight=2,
-                dash_array="8 4",
-                tooltip=folium.Tooltip(zone["name"], sticky=True),
-                popup=folium.Popup(f"<b>{zone['name']}</b>", max_width=200)
-            ).add_to(zone_group)
+            folium.Polygon(locations=zone["coords"], color=zone["color"], fill=True,
+                           fill_color=zone["color"], fill_opacity=0.10, weight=2,
+                           dash_array="8 4", tooltip=folium.Tooltip(zone["name"], sticky=True),
+                           popup=folium.Popup(f"<b>{zone['name']}</b>", max_width=200)).add_to(zone_group)
         zone_group.add_to(fmap)
-
-    # ---- ШАР: Лінії ЛЕП ----
     if "ЛЕП" in active_layers:
         lep_group = folium.FeatureGroup(name="⚡ Лінії ЛЕП", show=True)
         LEP_LINES = [
-            # 110 кВ  — ТП-12 → ТП-28
-            {
-                "coords": [[49.2331, 28.4682], [49.2425, 28.4810]],
-                "color": "#facc15", "weight": 4, "dash": None,
-                "label": "ЛЕП 110 кВ: ТП-12 → ТП-28"
-            },
-            # 35 кВ   — ТП-28 → ТП-245
-            {
-                "coords": [[49.2425, 28.4810], [49.2210, 28.4422]],
-                "color": "#fb923c", "weight": 3, "dash": "6 3",
-                "label": "ЛЕП 35 кВ: ТП-28 → ТП-245 (АВАРІЯ)"
-            },
-            # 10 кВ   — ТП-Шаргород-100 → ЦОК Шаргород
-            {
-                "coords": [[48.7364, 28.0822], [48.7390, 28.0805]],
-                "color": "#4ade80", "weight": 2, "dash": "3 3",
-                "label": "КЛ 10 кВ: ТП-Шаргород-100 → ЦОК"
-            },
-            # Магістраль 110 кВ — Вінниця → Хмільник
-            {
-                "coords": [[49.2331, 28.4682], [49.4410, 28.5122]],
-                "color": "#facc15", "weight": 4, "dash": None,
-                "label": "ЛЕП 110 кВ: Вінниця → Калинів (Хмільник)"
-            },
-            # Магістраль 35 кВ — Вінниця → Шаргород
-            {
-                "coords": [[49.2331, 28.4682], [48.7364, 28.0822]],
-                "color": "#fb923c", "weight": 2, "dash": "8 4",
-                "label": "ЛЕП 35 кВ: Вінниця → Шаргород"
-            },
+            {"coords":[[49.2331,28.4682],[49.2425,28.4810]],"color":"#facc15","weight":4,"dash":None,"label":"ЛЕП 110 кВ: ТП-12 → ТП-28"},
+            {"coords":[[49.2425,28.4810],[49.2210,28.4422]],"color":"#fb923c","weight":3,"dash":"6 3","label":"ЛЕП 35 кВ: ТП-28 → ТП-245 (АВАРІЯ)"},
+            {"coords":[[48.7364,28.0822],[48.7390,28.0805]],"color":"#4ade80","weight":2,"dash":"3 3","label":"КЛ 10 кВ: ТП-Шаргород-100 → ЦОК"},
+            {"coords":[[49.2331,28.4682],[49.4410,28.5122]],"color":"#facc15","weight":4,"dash":None,"label":"ЛЕП 110 кВ: Вінниця → Калинів"},
+            {"coords":[[49.2331,28.4682],[48.7364,28.0822]],"color":"#fb923c","weight":2,"dash":"8 4","label":"ЛЕП 35 кВ: Вінниця → Шаргород"},
         ]
         for lep in LEP_LINES:
-            folium.PolyLine(
-                locations=lep["coords"],
-                color=lep["color"],
-                weight=lep["weight"],
-                dash_array=lep.get("dash"),
-                tooltip=folium.Tooltip(lep["label"], sticky=True),
-                opacity=0.85
-            ).add_to(lep_group)
+            folium.PolyLine(locations=lep["coords"], color=lep["color"], weight=lep["weight"],
+                            dash_array=lep.get("dash"), tooltip=folium.Tooltip(lep["label"], sticky=True),
+                            opacity=0.85).add_to(lep_group)
         lep_group.add_to(fmap)
-
-    # ---- ШАР: Маркери об'єктів ----
     if "Об'єкти" in active_layers:
         obj_group = folium.FeatureGroup(name="📍 Об'єкти мережі", show=True)
         for obj in objects:
-            lat = obj.get("latitude")
-            lon = obj.get("longitude")
+            lat, lon = obj.get("latitude"), obj.get("longitude")
             if lat is None or lon is None:
                 continue
-
-            color = get_marker_color(obj.get("status", "Нормальна"))
-            icon  = get_marker_icon(obj.get("type", ""))
-
-            # Пульсуюче коло для аварій
-            if "АВАРІЯ" in obj.get("status", ""):
-                folium.CircleMarker(
-                    location=[lat, lon],
-                    radius=18,
-                    color="#ef4444",
-                    fill=True,
-                    fill_color="#ef4444",
-                    fill_opacity=0.20,
-                    weight=2,
-                ).add_to(obj_group)
-
-            folium.Marker(
-                location=[lat, lon],
-                tooltip=folium.Tooltip(
-                    f"<b>{obj['name']}</b><br>{obj.get('type','')}<br>Статус: {obj.get('status','')}",
-                    sticky=True
-                ),
-                popup=folium.Popup(build_popup_html(obj), max_width=300),
-                icon=folium.Icon(
-                    color=color,
-                    icon=icon,
-                    prefix="fa"
-                )
-            ).add_to(obj_group)
-
+            color = get_marker_color(obj.get("status","Нормальна"))
+            icon  = get_marker_icon(obj.get("type",""))
+            if "АВАРІЯ" in obj.get("status",""):
+                folium.CircleMarker(location=[lat,lon], radius=18, color="#ef4444",
+                                    fill=True, fill_color="#ef4444", fill_opacity=0.20, weight=2).add_to(obj_group)
+            folium.Marker(location=[lat,lon],
+                          tooltip=folium.Tooltip(f"<b>{obj['name']}</b><br>{obj.get('type','')}<br>Статус: {obj.get('status','')}", sticky=True),
+                          popup=folium.Popup(build_popup_html(obj), max_width=300),
+                          icon=folium.Icon(color=color, icon=icon, prefix="fa")).add_to(obj_group)
         obj_group.add_to(fmap)
-
-    # ---- Легенда ----
     legend_html = """
-    <div style="position:fixed;bottom:30px;left:30px;z-index:9999;
-                background:#1e293b;color:#f1f5f9;padding:12px 16px;
-                border-radius:8px;font-size:12px;border:1px solid #334155;
+    <div style="position:fixed;bottom:30px;left:30px;z-index:9999;background:#1e293b;color:#f1f5f9;
+                padding:12px 16px;border-radius:8px;font-size:12px;border:1px solid #334155;
                 box-shadow:0 2px 8px rgba(0,0,0,.5)">
       <b style="font-size:13px">Легенда</b><br>
       <span style="color:#ef4444">●</span> Аварія &nbsp;
@@ -447,108 +298,68 @@ def build_folium_map(objects: list, active_layers: list) -> "folium.Map":
       <span style="color:#22c55e">●</span> Норма<br>
       <span style="color:#facc15">━━</span> ЛЕП 110 кВ &nbsp;
       <span style="color:#fb923c">╌╌</span> ЛЕП 35 кВ &nbsp;
-      <span style="color:#4ade80">╌╌</span> КЛ 10 кВ<br>
-      <span style="opacity:.6">░░░</span> Зона обслуговування СО
-    </div>
-    """
+      <span style="color:#4ade80">╌╌</span> КЛ 10 кВ
+    </div>"""
     fmap.get_root().html.add_child(folium.Element(legend_html))
     folium.LayerControl(collapsed=False).add_to(fmap)
     return fmap
-
 
 # ==========================================
 # ВКЛАДКА: ГОЛОВНА СТОРІНКА
 # ==========================================
 if "home" in tab_map:
     with tab_map["home"]:
-
-        # ── Герой-блок ──────────────────────────────────────────────────
         st.markdown("""
-        <div style="
-            background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 60%, #0f172a 100%);
-            border-radius: 16px;
-            padding: 3rem 2.5rem 2.5rem 2.5rem;
-            margin-bottom: 2rem;
-            border: 1px solid #1e3a5f;
-            position: relative;
-            overflow: hidden;
-        ">
-            <div style="position:absolute;top:-40px;right:-40px;font-size:220px;
-                        opacity:0.04;line-height:1;">⚡</div>
+        <div style="background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 60%,#0f172a 100%);
+                    border-radius:16px;padding:3rem 2.5rem 2.5rem;margin-bottom:2rem;
+                    border:1px solid #1e3a5f;position:relative;overflow:hidden;">
+            <div style="position:absolute;top:-40px;right:-40px;font-size:220px;opacity:0.04;line-height:1;">⚡</div>
             <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.8rem;">
                 <span style="font-size:2.8rem;">⚡</span>
                 <div>
-                    <div style="color:#93c5fd;font-size:0.85rem;letter-spacing:3px;
-                                text-transform:uppercase;font-weight:600;">
+                    <div style="color:#93c5fd;font-size:0.85rem;letter-spacing:3px;text-transform:uppercase;font-weight:600;">
                         АТ «ВІННИЦЯОБЛЕНЕРГО»
                     </div>
-                    <h1 style="color:#f1f5f9;margin:0;font-size:2.1rem;line-height:1.2;">
-                        ГІС Диспетчерська Система
-                    </h1>
+                    <h1 style="color:#f1f5f9;margin:0;font-size:2.1rem;line-height:1.2;">ГІС Диспетчерська Система</h1>
                     <div style="color:#60a5fa;font-size:1.1rem;margin-top:4px;">
                         Регіональних Електромереж&nbsp;&nbsp;
-                        <span style="background:#1d4ed8;color:#fff;border-radius:6px;
-                                     padding:2px 10px;font-size:0.8rem;vertical-align:middle;">
-                            v5.0
-                        </span>
+                        <span style="background:#1d4ed8;color:#fff;border-radius:6px;padding:2px 10px;font-size:0.8rem;vertical-align:middle;">v5.0</span>
                     </div>
                 </div>
             </div>
             <p style="color:#94a3b8;font-size:1rem;max-width:700px;margin:1rem 0 0 0;line-height:1.7;">
-                Єдина цифрова платформа оперативного управління, моніторингу та технічного
-                обслуговування електричних мереж Вінницької області. Об'єднує диспетчерів,
-                інженерів та виїзні бригади в одному захищеному середовищі реального часу.
+                Єдина цифрова платформа оперативного управління, моніторингу та технічного обслуговування
+                електричних мереж Вінницької області.
             </p>
         </div>
         """, unsafe_allow_html=True)
 
-        # ── Статистика одним рядком ──────────────────────────────────────
         s1, s2, s3, s4, s5 = st.columns(5)
         def stat_card(col, icon, value, label, color="#38bdf8"):
             col.markdown(f"""
-            <div style="background:#1e293b;border-radius:10px;padding:1rem 0.8rem;
-                        text-align:center;border:1px solid #334155;">
+            <div style="background:#1e293b;border-radius:10px;padding:1rem 0.8rem;text-align:center;border:1px solid #334155;">
                 <div style="font-size:1.6rem;">{icon}</div>
                 <div style="color:{color};font-size:1.5rem;font-weight:700;line-height:1.2;">{value}</div>
                 <div style="color:#64748b;font-size:0.75rem;margin-top:3px;">{label}</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        stat_card(s1, "🏭", "8",    "Структурних одиниць")
-        stat_card(s2, "🔌", "26",   "Дільниць обслуговування")
-        stat_card(s3, "⚡", "148.5 МВт", "Потужність мережі", "#a78bfa")
-        stat_card(s4, "🗺️", "6",   "ГІС-об'єктів в БД", "#34d399")
-        stat_card(s5, "🚨", "1",    "Активних аварій", "#f87171")
+            </div>""", unsafe_allow_html=True)
+        stat_card(s1,"🏭","8","Структурних одиниць")
+        stat_card(s2,"🔌","26","Дільниць обслуговування")
+        stat_card(s3,"⚡","148.5 МВт","Потужність мережі","#a78bfa")
+        stat_card(s4,"🗺️","6","ГІС-об'єктів в БД","#34d399")
+        stat_card(s5,"🚨","1","Активних аварій","#f87171")
 
         st.markdown("<div style='margin-top:2rem'></div>", unsafe_allow_html=True)
-
-        # ── Два стовпці: можливості + технології ────────────────────────
         col_feat, col_tech = st.columns([1.1, 0.9])
-
         with col_feat:
             st.markdown("### 🧩 Функціональні модулі системи")
-
             modules = [
-                ("🗺️", "Диспетчер ГІС-мапи",
-                 "Інтерактивна Folium-карта з шарами ЛЕП, зонами СО та кольоровими маркерами аварій. "
-                 "Pop-up телеметрія по кліку. Дистанційне керування фідерами через SCADA-інтерфейс."),
-                ("📱", "Мобільний клієнт бригади",
-                 "Цифровий наряд-допуск для виїзних бригад: чек-лист безпеки, звіт про виконану роботу, "
-                 "закриття наряду з автозаписом у журнал подій."),
-                ("📊", "Аналітика та KPI",
-                 "Прогнозування добового навантаження SmartGrid AI, індекси надійності SAIDI/SAIFI, "
-                 "кругова діаграма розподілу подій у реальному часі."),
-                ("📋", "Журнал подій",
-                 "Повний аудит-лог з фільтрацією за типом події, критичністю та об'єктом. "
-                 "Фіксує дії операторів та записи бригад із міткою часу."),
-                ("📅", "Планування ТО",
-                 "Графік регламентного технічного обслуговування з можливістю додавання нових задач "
-                 "прямо з інтерфейсу диспетчера."),
-                ("👥", "Управління доступом",
-                 "Рольова модель (Адмін / Диспетчер / Монтер), реєстрація нових користувачів, "
-                 "матриця прав доступу за вкладками. Тільки для адміністраторів."),
+                ("🗺️","Диспетчер ГІС-мапи","Інтерактивна Folium-карта з шарами ЛЕП, зонами СО та кольоровими маркерами аварій."),
+                ("📱","Мобільний клієнт бригади","Цифровий наряд-допуск для виїзних бригад: чек-лист безпеки, звіт про виконану роботу."),
+                ("🌡️","SmartGrid AI — Аналітика","Симуляція навантаження залежно від температури (-20°C…+40°C), детекція аномалій напруги, Threshold Alerts."),
+                ("📋","Журнал подій","Повний аудит-лог з фільтрацією за типом події, критичністю та об'єктом."),
+                ("📅","Планування ТО","Графік регламентного технічного обслуговування."),
+                ("👥","Управління доступом","Рольова модель (Адмін / Диспетчер / Монтер). Тільки для адміністраторів."),
             ]
-
             for icon, title, desc in modules:
                 with st.container(border=True):
                     st.markdown(f"**{icon} {title}**")
@@ -557,41 +368,14 @@ if "home" in tab_map:
         with col_tech:
             st.markdown("### 🛠️ Технічний стек")
             st.markdown("""
-            <div style="background:#1e293b;border-radius:12px;padding:1.2rem 1.4rem;
-                        border:1px solid #334155;font-size:0.88rem;line-height:2;">
+            <div style="background:#1e293b;border-radius:12px;padding:1.2rem 1.4rem;border:1px solid #334155;font-size:0.88rem;line-height:2;">
                 <table style="width:100%;border-collapse:collapse;color:#cbd5e1;">
-                    <tr>
-                        <td style="color:#60a5fa;width:38%;padding:4px 0;">🐍 Мова</td>
-                        <td>Python 3.11+</td>
-                    </tr>
-                    <tr>
-                        <td style="color:#60a5fa;padding:4px 0;">🖥️ Фреймворк</td>
-                        <td>Streamlit ≥ 1.35</td>
-                    </tr>
-                    <tr>
-                        <td style="color:#60a5fa;padding:4px 0;">🗺️ Картографія</td>
-                        <td>Folium + streamlit-folium</td>
-                    </tr>
-                    <tr>
-                        <td style="color:#60a5fa;padding:4px 0;">📊 Аналітика</td>
-                        <td>Pandas + Matplotlib</td>
-                    </tr>
-                    <tr>
-                        <td style="color:#60a5fa;padding:4px 0;">📁 Експорт</td>
-                        <td>openpyxl (XLSX / CSV)</td>
-                    </tr>
-                    <tr>
-                        <td style="color:#60a5fa;padding:4px 0;">🔐 Авторизація</td>
-                        <td>Session-state + рольова модель</td>
-                    </tr>
-                    <tr>
-                        <td style="color:#60a5fa;padding:4px 0;">🎨 Теми карти</td>
-                        <td>CartoDB Dark Matter</td>
-                    </tr>
-                    <tr>
-                        <td style="color:#60a5fa;padding:4px 0;">📦 Версія</td>
-                        <td>v5.0 — травень 2026</td>
-                    </tr>
+                    <tr><td style="color:#60a5fa;width:38%;padding:4px 0;">🐍 Мова</td><td>Python 3.11+</td></tr>
+                    <tr><td style="color:#60a5fa;padding:4px 0;">🖥️ Фреймворк</td><td>Streamlit ≥ 1.35</td></tr>
+                    <tr><td style="color:#60a5fa;padding:4px 0;">🗺️ Картографія</td><td>Folium + streamlit-folium</td></tr>
+                    <tr><td style="color:#60a5fa;padding:4px 0;">🌡️ SmartGrid AI</td><td>Температурна модель + Anomaly Detection</td></tr>
+                    <tr><td style="color:#60a5fa;padding:4px 0;">📊 Аналітика</td><td>Pandas + Matplotlib</td></tr>
+                    <tr><td style="color:#60a5fa;padding:4px 0;">📦 Версія</td><td>v5.0 — травень 2026</td></tr>
                 </table>
             </div>
             """, unsafe_allow_html=True)
@@ -599,24 +383,16 @@ if "home" in tab_map:
             st.markdown("<div style='margin-top:1.2rem'></div>", unsafe_allow_html=True)
             st.markdown("### 🗂️ Охоплення мережі")
             coverage = {
-                "СО «Вінницькі міські ЕМ»": 1,
-                "СО «Вінницькі центральні ЕМ»": 3,
-                "СО «Жмеринські ЕМ»": 3,
-                "СО «Хмільницькі ЕМ»": 3,
-                "СО «Гайсинські ЕМ»": 5,
-                "СО «Могилів-Подільські ЕМ»": 4,
-                "СО «Тульчинські ЕМ»": 4,
-                "СО «Вінницькі східні ЕМ»": 5,
+                "СО «Вінницькі міські ЕМ»": 1, "СО «Вінницькі центральні ЕМ»": 3,
+                "СО «Жмеринські ЕМ»": 3, "СО «Хмільницькі ЕМ»": 3,
+                "СО «Гайсинські ЕМ»": 5, "СО «Могилів-Подільські ЕМ»": 4,
+                "СО «Тульчинські ЕМ»": 4, "СО «Вінницькі східні ЕМ»": 5,
             }
-            import matplotlib.pyplot as plt
             fig_h, ax_h = plt.subplots(figsize=(5, 3.2))
             fig_h.patch.set_facecolor("#1e293b")
             ax_h.set_facecolor("#1e293b")
-            bars = ax_h.barh(
-                [k.replace("СО «", "").replace("»", "") for k in coverage.keys()],
-                list(coverage.values()),
-                color="#3b82f6", height=0.55
-            )
+            bars = ax_h.barh([k.replace("СО «","").replace("»","") for k in coverage.keys()],
+                             list(coverage.values()), color="#3b82f6", height=0.55)
             ax_h.bar_label(bars, fmt="%d дільн.", color="#93c5fd", fontsize=8, padding=3)
             ax_h.tick_params(colors="#94a3b8", labelsize=8)
             ax_h.spines[:].set_color("#334155")
@@ -626,24 +402,14 @@ if "home" in tab_map:
             st.pyplot(fig_h)
             plt.close(fig_h)
 
-        # ── Нижній банер ─────────────────────────────────────────────────
-        st.markdown("<div style='margin-top:1.5rem'></div>", unsafe_allow_html=True)
         st.markdown("""
         <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:10px;
-                    padding:1rem 1.5rem;display:flex;justify-content:space-between;
-                    align-items:center;flex-wrap:wrap;gap:0.5rem;">
-            <span style="color:#475569;font-size:0.8rem;">
-                © 2026 АТ «Вінницяобленерго» — ГІС ДС v5.0
-            </span>
-            <span style="color:#475569;font-size:0.8rem;">
-                🔒 Конфіденційна інформація. Доступ суворо за ролями.
-            </span>
-            <span style="color:#475569;font-size:0.8rem;">
-                ІТ-відділ: it@voe.com.ua
-            </span>
+                    padding:1rem 1.5rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;margin-top:1.5rem;">
+            <span style="color:#475569;font-size:0.8rem;">© 2026 АТ «Вінницяобленерго» — ГІС ДС v5.0</span>
+            <span style="color:#475569;font-size:0.8rem;">🔒 Конфіденційна інформація. Доступ суворо за ролями.</span>
+            <span style="color:#475569;font-size:0.8rem;">ІТ-відділ: it@voe.com.ua</span>
         </div>
         """, unsafe_allow_html=True)
-
 
 # ==========================================
 # ВКЛАДКА: ДИСПЕТЧЕР МАПИ
@@ -651,32 +417,22 @@ if "home" in tab_map:
 if "map" in tab_map:
     with tab_map["map"]:
         st.title("🗺️ Оперативний диспетчерський пульт ГІС")
-
         if not FOLIUM_AVAILABLE:
-            st.warning(
-                "⚠️ Бібліотеки `folium` та `streamlit-folium` не встановлені. "
-                "Виконайте: `pip install folium streamlit-folium`"
-            )
-
+            st.warning("⚠️ Бібліотеки `folium` та `streamlit-folium` не встановлені. Виконайте: `pip install folium streamlit-folium`")
         col_map, col_side = st.columns([2.3, 1])
-
         with col_map:
             st.markdown("##### 🛠️ Активні шари карти:")
             layer_cols = st.columns(3)
-            show_objects = layer_cols[0].checkbox("📍 Об'єкти мережі",   value=True)
-            show_lep     = layer_cols[1].checkbox("⚡ Лінії ЛЕП",       value=True)
-            show_zones   = layer_cols[2].checkbox("🗺️ Зони СО",         value=False)
-
+            show_objects = layer_cols[0].checkbox("📍 Об'єкти мережі", value=True)
+            show_lep     = layer_cols[1].checkbox("⚡ Лінії ЛЕП",      value=True)
+            show_zones   = layer_cols[2].checkbox("🗺️ Зони СО",        value=False)
             active_layers = []
             if show_objects: active_layers.append("Об'єкти")
             if show_lep:     active_layers.append("ЛЕП")
             if show_zones:   active_layers.append("Зони СО")
-
             if FOLIUM_AVAILABLE:
                 fmap = build_folium_map(st.session_state.objects, active_layers)
                 map_result = st_folium(fmap, width="100%", height=520, returned_objects=["last_object_clicked_popup"])
-
-                # Якщо клацнули маркер — автовибір об'єкта в правій панелі
                 clicked_popup = (map_result or {}).get("last_object_clicked_popup")
                 if clicked_popup:
                     for o in st.session_state.objects:
@@ -686,67 +442,52 @@ if "map" in tab_map:
             else:
                 map_df = pd.DataFrame(st.session_state.objects)
                 st.map(map_df, size=40)
-
             st.markdown("##### 🔍 Вибір об'єкта для телеметрії:")
             obj_names = [o["name"] for o in st.session_state.objects]
             try:
                 curr_index = obj_names.index(st.session_state.selected_object["name"])
             except ValueError:
                 curr_index = 0
-
             selected_name = st.selectbox("Оберіть вузол:", obj_names, index=curr_index)
             for o in st.session_state.objects:
                 if o["name"] == selected_name:
                     st.session_state.selected_object = o
-
         with col_side:
             obj = st.session_state.selected_object
             st.subheader("ℹ️ Телеметрія та Управління")
             st.markdown(f"### {obj.get('name', 'Невідомий об\'єкт')}")
-
-            status = obj.get('status', 'Нормальна')
-            if "АВАРІЯ" in status:       st.error(f"Статус: {status}")
-            elif "Попередження" in status: st.warning(f"Статус: {status}")
-            else:                          st.success(f"Статус: {status}")
-
-            criticality = obj.get('criticality', 'Середня')
-            st.markdown(f"**Підпорядкування:** `{obj.get('subdivision', 'Центральний апарат')}`")
+            status = obj.get('status','Нормальна')
+            if "АВАРІЯ" in status:          st.error(f"Статус: {status}")
+            elif "Попередження" in status:  st.warning(f"Статус: {status}")
+            else:                           st.success(f"Статус: {status}")
+            criticality = obj.get('criticality','Середня')
+            st.markdown(f"**Підпорядкування:** `{obj.get('subdivision','Центральний апарат')}`")
             st.markdown(f"**Важливість вузла:** `{criticality}`")
-            st.markdown(f"**Координати:** `{obj.get('latitude', 0.0):.4f}° N, {obj.get('longitude', 0.0):.4f}° E`")
-            st.markdown(f"**Технічні параметри:** {obj.get('desc', 'Немає опису')}")
-
+            st.markdown(f"**Координати:** `{obj.get('latitude',0.0):.4f}° N, {obj.get('longitude',0.0):.4f}° E`")
+            st.markdown(f"**Технічні параметри:** {obj.get('desc','Немає опису')}")
             st.divider()
             st.markdown("🎛️ **Команди дистанційного керування:**")
             if st.button("⚡ Вимкнути фідер (SCADA)", use_container_width=True):
                 st.toast(f"🚨 Сигнал оперативної комутації надіслано на {obj.get('name')}!")
                 st.session_state.log_data.insert(0, {
-                    "Час": datetime.datetime.now().strftime("%d.%m %H:%M"),
-                    "Тип": "Ремонт",
+                    "Час": datetime.datetime.now().strftime("%d.%m %H:%M"), "Тип": "Ремонт",
                     "Об'єкт": obj.get('name'),
                     "Опис": f"Дистанційне оперативне керування. Оператор: {current_user['display_name']}",
                     "Критичність": "Висока"
                 })
-
             if st.button("📲 Передати наряд черговому майстру дільниці", use_container_width=True):
-                st.toast(f"📡 Дані надіслано в базу відповідної структурної одиниці ЕМ!")
-
+                st.toast("📡 Дані надіслано в базу відповідної структурної одиниці ЕМ!")
             permit_text = (
-                f"НАРЯД-ДОПУСК №{obj.get('name', 'ТП')}-2026\n"
+                f"НАРЯД-ДОПУСК №{obj.get('name','ТП')}-2026\n"
                 f"Об'єкт: {obj.get('name')} ({obj.get('type')})\n"
-                f"Підрозділ: {obj.get('subdivision')}\n"
-                f"Критичність: {criticality}\n"
+                f"Підрозділ: {obj.get('subdivision')}\nКритичність: {criticality}\n"
                 f"Координати: {obj.get('latitude')}, {obj.get('longitude')}\n"
-                f"Опис: {obj.get('desc')}\n"
-                f"Видав: {current_user['display_name']}\n"
+                f"Опис: {obj.get('desc')}\nВидав: {current_user['display_name']}\n"
                 f"Згенеровано системою Вінницяобленерго."
             )
-            st.download_button(
-                label="📄 Завантажити Наряд-Допуск (.txt)",
-                data=permit_text,
-                file_name=f"permit_{obj.get('name', 'TP')}.txt",
-                mime="text/plain",
-                use_container_width=True
-            )
+            st.download_button(label="📄 Завантажити Наряд-Допуск (.txt)",
+                               data=permit_text, file_name=f"permit_{obj.get('name','TP')}.txt",
+                               mime="text/plain", use_container_width=True)
 
 # ==========================================
 # ВКЛАДКА: МОБІЛЬНИЙ КЛІЄНТ
@@ -757,9 +498,8 @@ if "mobile" in tab_map:
         _, phone_col, _ = st.columns([1, 2, 1])
         with phone_col:
             st.markdown("---")
-            st.markdown("<h3 style='text-align: center; color: #185FA5;'>📱 Мобільна бригада АТ «Вінницяобленерго»</h3>", unsafe_allow_html=True)
+            st.markdown("<h3 style='text-align:center;color:#185FA5;'>📱 Мобільна бригада АТ «Вінницяобленерго»</h3>", unsafe_allow_html=True)
             st.info(f"👷 {current_user['display_name']} | GPS: Активний")
-            
             if st.session_state.task_closed:
                 st.success("🎉 Наряд успішно закрито та підписано ЕЦП!")
                 if st.button("🔄 Оновити стрічку завдань"):
@@ -768,23 +508,20 @@ if "mobile" in tab_map:
             else:
                 st.warning("📋 **Поточна задача СО «Жмеринські ЕМ» (Шаргородська дільниця):**")
                 st.markdown("**Об'єкт:** ТП-Шаргород-100  \n**Завдання:** Планова діагностика шин та огляд вимикачів лінії.")
-                
                 tb_1 = st.checkbox("Заземлення встановлено")
                 tb_2 = st.checkbox("Плакати з техніки безпеки розвішано")
-                
                 comment = st.text_area("Звіт про виконану роботу:")
                 if st.button("🚀 Закрити наряд-допуск", use_container_width=True):
                     if tb_1 and tb_2 and comment:
                         st.session_state.task_closed = True
                         st.session_state.log_data.insert(0, {
-                            "Час": datetime.datetime.now().strftime("%d.%m %H:%M"),
-                            "Тип": "Планове ТО",
+                            "Час": datetime.datetime.now().strftime("%d.%m %H:%M"), "Тип": "Планове ТО",
                             "Об'єкт": "ТП-Шаргород-100",
-                            "Опис": f"[{current_user['display_name']}]: {comment}",
-                            "Критичність": "Висока"
+                            "Опис": f"[{current_user['display_name']}]: {comment}", "Критичність": "Висока"
                         })
                         st.rerun()
-                    else: st.error("Заповніть чек-лист безпеки та коментар!")
+                    else:
+                        st.error("Заповніть чек-лист безпеки та коментар!")
             st.markdown("---")
 
 # ==========================================
@@ -794,9 +531,7 @@ if "structure" in tab_map:
     with tab_map["structure"]:
         st.title("🏛️ Організаційна структура та зони обслуговування АТ «Вінницяобленерго»")
         st.markdown("Розподіл компанії за напрямками на базі адміністративних районів області:")
-        
         col_str, col_shargorod = st.columns([1.8, 1.2])
-        
         with col_str:
             st.subheader("📁 Структурні Одиниці (СО)")
             for em, info in st.session_state.org_structure.items():
@@ -804,81 +539,320 @@ if "structure" in tab_map:
                     st.markdown("**Зона обслуговування (Покриття дільниць):**")
                     for sub in info["дільниці"]:
                         st.write(f"• {sub} дільниця")
-                        
         with col_shargorod:
             st.subheader("📍 Особливий статус: Шаргородський регіон")
             st.info("ℹ️ Шаргород та колишній Шаргородський район повністю охоплюються АТ «Вінницяобленерго». Адміністративно Шаргородська дільниця входить до складу структури СО «Жмеринські електричні мережі».")
-            
             box_sh = st.container(border=True)
             box_sh.markdown("### 🏢 Безпосередньо у місті Шаргород діють:")
             box_sh.markdown("""
-            * **🔧 Шаргородська дільниця** — технічне обслуговування мереж, поточний та капітальний ремонт ліній і підстанцій.
-            * **👥 Центр обслуговування клієнтів (ЦОК)** — прийом споживачів з питань нових приєднань, технічних умов, встановлення лічильників та договірної документації.
+            * **🔧 Шаргородська дільниця** — технічне обслуговування мереж, поточний та капітальний ремонт.
+            * **👥 Центр обслуговування клієнтів (ЦОК)** — прийом споживачів з питань нових приєднань, технічних умов.
             """)
-            
             st.caption("🗺️ Локація сервісної інфраструктури в м. Шаргород:")
             if FOLIUM_AVAILABLE:
-                sh_map = folium.Map(location=[48.7377, 28.0813], zoom_start=15, tiles="CartoDB dark_matter")
+                sh_map = folium.Map(location=[48.7377,28.0813], zoom_start=15, tiles="CartoDB dark_matter")
                 sh_objects = [
-                    {"name": "ТП-Шаргород-100", "latitude": 48.7364, "longitude": 28.0822,
-                     "type": "Підстанція", "status": "Нормальна", "criticality": "Висока",
-                     "subdivision": "СО «Жмеринські ЕМ»", "desc": "ВН-35/10 кВ. Шаргородська дільниця."},
-                    {"name": "ЦОК Шаргород", "latitude": 48.7390, "longitude": 28.0805,
-                     "type": "Центр клієнтів", "status": "Нормальна", "criticality": "Низька",
-                     "subdivision": "СО «Жмеринські ЕМ»", "desc": "Прийом споживачів."},
+                    {"name":"ТП-Шаргород-100","latitude":48.7364,"longitude":28.0822,"type":"Підстанція",
+                     "status":"Нормальна","criticality":"Висока","subdivision":"СО «Жмеринські ЕМ»","desc":"ВН-35/10 кВ."},
+                    {"name":"ЦОК Шаргород","latitude":48.7390,"longitude":28.0805,"type":"Центр клієнтів",
+                     "status":"Нормальна","criticality":"Низька","subdivision":"СО «Жмеринські ЕМ»","desc":"Прийом споживачів."},
                 ]
                 for o in sh_objects:
-                    folium.Marker(
-                        location=[o["latitude"], o["longitude"]],
-                        tooltip=o["name"],
-                        popup=folium.Popup(build_popup_html(o), max_width=280),
-                        icon=folium.Icon(color=get_marker_color(o["status"]),
-                                        icon=get_marker_icon(o["type"]), prefix="fa")
-                    ).add_to(sh_map)
-                # КЛ між об'єктами
-                folium.PolyLine(
-                    [[48.7364, 28.0822], [48.7390, 28.0805]],
-                    color="#4ade80", weight=2, dash_array="4 3",
-                    tooltip="КЛ 10 кВ: ТП-100 → ЦОК"
-                ).add_to(sh_map)
+                    folium.Marker(location=[o["latitude"],o["longitude"]], tooltip=o["name"],
+                                  popup=folium.Popup(build_popup_html(o), max_width=280),
+                                  icon=folium.Icon(color=get_marker_color(o["status"]),
+                                                  icon=get_marker_icon(o["type"]), prefix="fa")).add_to(sh_map)
+                folium.PolyLine([[48.7364,28.0822],[48.7390,28.0805]], color="#4ade80", weight=2,
+                                dash_array="4 3", tooltip="КЛ 10 кВ: ТП-100 → ЦОК").add_to(sh_map)
                 st_folium(sh_map, width="100%", height=300, returned_objects=[])
             else:
                 sh_df = pd.DataFrame([
-                    {"name": "ТП-Шаргород-100", "latitude": 48.7364, "longitude": 28.0822},
-                    {"name": "ЦОК Шаргород", "latitude": 48.7390, "longitude": 28.0805}
+                    {"name":"ТП-Шаргород-100","latitude":48.7364,"longitude":28.0822},
+                    {"name":"ЦОК Шаргород","latitude":48.7390,"longitude":28.0805}
                 ])
                 st.map(sh_df, zoom=13, size=45)
 
 # ==========================================
-# ВКЛАДКА: АНАЛІТИКА ТА KPI
+# ВКЛАДКА: АНАЛІТИКА ТА KPI (SmartGrid AI)
 # ==========================================
 if "analytics" in tab_map:
     with tab_map["analytics"]:
-        st.title("📊 Апарат інтелектуальної аналітики")
-        
+        st.title("📊 SmartGrid AI — Інтелектуальна аналітика мережі")
+
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Індекс надійності SAIDI", "42.5 хв/рік", "-3.2 хв від плану", delta_color="inverse")
         m2.metric("Індекс частоти вимкнень SAIFI", "1.14 од/рік", "+0.02", delta_color="inverse")
         m3.metric("Загальна потужність споживання", "148.5 МВт", "Норма")
         m4.metric("Коефіцієнт корисного використання", "94.2%", "+0.5%")
-        
-        st.markdown("### 📈 Прогнозування добового навантаження мережі та Аварійність")
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
-        
+
+        st.markdown("---")
+
+        # ── БЛОК 1: Симуляція навантаження ─────────────────────────────
+        st.markdown("### 🌡️ SmartGrid AI — Симуляція навантаження за температурою")
+
+        col_ctrl, col_info = st.columns([2, 1])
+        with col_ctrl:
+            temperature = st.slider(
+                "🌡️ Температура зовнішнього середовища (°C)",
+                min_value=-20, max_value=40, value=15, step=1,
+                help="Зміна температури впливає на прогнозоване навантаження мережі"
+            )
+        with col_info:
+            if temperature <= -10:
+                season_label, season_color = "❄️ Сильні морози", "#60a5fa"
+            elif temperature <= 0:
+                season_label, season_color = "🌨️ Зима", "#93c5fd"
+            elif temperature <= 10:
+                season_label, season_color = "🌤️ Прохолодна погода", "#6ee7b7"
+            elif temperature <= 20:
+                season_label, season_color = "🌿 Весна / Осінь", "#34d399"
+            elif temperature <= 30:
+                season_label, season_color = "☀️ Тепло", "#fbbf24"
+            else:
+                season_label, season_color = "🔥 Спека / Кондиціонери", "#f87171"
+            st.markdown(f"""
+            <div style="background:#1e293b;border-radius:10px;padding:0.9rem 1.1rem;
+                        border-left:4px solid {season_color};margin-top:0.4rem;">
+                <div style="color:{season_color};font-weight:700;font-size:1rem;">{season_label}</div>
+                <div style="color:#94a3b8;font-size:0.82rem;margin-top:4px;">
+                    Поточна t°: <b style="color:#f1f5f9">{temperature}°C</b>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        BASE_LOAD = [65, 50, 85, 110, 140, 148, 90]
         hours = [f"{i}:00" for i in range(0, 25, 4)]
-        actual_load = [65, 50, 85, 110, 140, 148, 90]
-        predicted_load = [62, 53, 80, 115, 138, 145, 95]
-        ax1.plot(hours, actual_load, label="Фактичне навантаження (МВт)", color="#38bdf8", marker="o", linewidth=2)
-        ax1.plot(hours, predicted_load, label="Прогноз SmartGrid AI", color="#a855f7", linestyle="--")
-        ax1.set_title("Прогноз графіка навантаження", fontsize=10)
-        ax1.legend()
-        ax1.grid(True, alpha=0.2)
-        
+        LOAD_THRESHOLD_HIGH = 160.0
+        LOAD_THRESHOLD_LOW  = 35.0
+
+        def compute_load_for_temp(base_load, temp):
+            if temp < 0:
+                factor = 1.0 + 0.04 * abs(temp)
+            elif temp <= 20:
+                factor = 1.0 - 0.015 * (temp - 15)
+            else:
+                factor = 0.925 + 0.025 * (temp - 20)
+            return [round(v * factor, 1) for v in base_load]
+
+        predicted_load = compute_load_for_temp(BASE_LOAD, temperature)
+        actual_load    = [v + (i % 3 - 1) * 2.5 for i, v in enumerate(predicted_load)]
+        overload_hours  = [hours[i] for i, v in enumerate(predicted_load) if v > LOAD_THRESHOLD_HIGH]
+        underload_hours = [hours[i] for i, v in enumerate(predicted_load) if v < LOAD_THRESHOLD_LOW]
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.2))
+        fig.patch.set_facecolor("#0f172a")
+        ax1.set_facecolor("#1e293b")
+        ax1.plot(hours, actual_load, label="Фактичне навантаження (МВт)",
+                 color="#38bdf8", marker="o", linewidth=2.5, markersize=6)
+        ax1.plot(hours, predicted_load, label=f"Прогноз SmartGrid AI ({temperature}°C)",
+                 color="#a855f7", linestyle="--", linewidth=2)
+        ax1.axhline(y=LOAD_THRESHOLD_HIGH, color="#ef4444", linestyle=":", linewidth=1.5,
+                    label=f"Верхня межа ({LOAD_THRESHOLD_HIGH} МВт)")
+        ax1.axhline(y=LOAD_THRESHOLD_LOW,  color="#f59e0b", linestyle=":", linewidth=1.5,
+                    label=f"Нижня межа ({LOAD_THRESHOLD_LOW} МВт)")
+        ax1.fill_between(range(len(hours)), LOAD_THRESHOLD_HIGH,
+                         [max(v, LOAD_THRESHOLD_HIGH) for v in predicted_load],
+                         color="#ef4444", alpha=0.15, label="⚠️ Перевантаження")
+        ax1.fill_between(range(len(hours)), LOAD_THRESHOLD_LOW,
+                         [min(v, LOAD_THRESHOLD_LOW) for v in predicted_load],
+                         color="#f59e0b", alpha=0.15, label="⚠️ Недовантаження")
+        ax1.set_xticks(range(len(hours)))
+        ax1.set_xticklabels(hours, color="#94a3b8", fontsize=8)
+        ax1.set_title(f"Прогноз навантаження при {temperature}°C", color="#f1f5f9", fontsize=10)
+        ax1.legend(fontsize=7, facecolor="#1e293b", edgecolor="#334155", labelcolor="#cbd5e1")
+        ax1.grid(True, alpha=0.15, color="#334155")
+        ax1.tick_params(colors="#64748b")
+        ax1.spines[:].set_color("#334155")
+        ax1.set_ylabel("МВт", color="#64748b", fontsize=9)
+        ax1.set_ylim(0, 200)
+
+        ax2.set_facecolor("#1e293b")
         current_logs_df = pd.DataFrame(st.session_state.log_data)
         types_distribution = current_logs_df["Тип"].value_counts()
-        ax2.pie(types_distribution.values, labels=types_distribution.index, colors=['#ef4444', '#f59e0b', '#10b981', '#38bdf8', '#bc5090'], autopct='%1.1f%%', startangle=90)
-        ax2.set_title("Розподіл подій у журналі", fontsize=10)
+        wedge_colors = ["#ef4444", "#f59e0b", "#10b981", "#38bdf8", "#bc5090"]
+        wedges, texts, autotexts = ax2.pie(
+            types_distribution.values, labels=types_distribution.index,
+            colors=wedge_colors[:len(types_distribution)], autopct="%1.1f%%", startangle=90,
+            wedgeprops=dict(edgecolor="#0f172a", linewidth=2)
+        )
+        for t in texts: t.set_color("#94a3b8"); t.set_fontsize(8)
+        for at in autotexts: at.set_color("#f1f5f9"); at.set_fontsize(8)
+        ax2.set_title("Розподіл подій у журналі", color="#f1f5f9", fontsize=10)
+        plt.tight_layout(pad=2.0)
         st.pyplot(fig)
+        plt.close(fig)
+
+        # ── БЛОК 2: Детекція аномалій ───────────────────────────────────
+        st.markdown("---")
+        st.markdown("### 🚨 SmartGrid AI — Детекція аномалій та Threshold Alerts")
+
+        _rnd.seed(temperature + 42)
+
+        VOLTAGE_NORMS = {
+            "Підстанція 110 кВ": {"nom": 110.0, "low": 100.0, "high": 120.0},
+            "Підстанція 35 кВ":  {"nom": 35.0,  "low": 31.5,  "high": 38.5},
+            "Підстанція 10 кВ":  {"nom": 10.0,  "low": 9.0,   "high": 11.0},
+            "Лінія 10 кВ":       {"nom": 10.0,  "low": 8.8,   "high": 10.5},
+        }
+
+        def simulate_voltage(obj, temp):
+            base_voltages = {
+                "ТП-12":           ("Підстанція 110 кВ", 110.0),
+                "ТП-28":           ("Підстанція 35 кВ",  35.0),
+                "ТП-245":          ("Підстанція 10 кВ",  10.0),
+                "ТП-Шаргород-100": ("Підстанція 35 кВ",  35.0),
+                "ЦОК Шаргород":    ("Лінія 10 кВ",       10.0),
+                "Оп. №9":          ("Лінія 10 кВ",       10.0),
+            }
+            vtype, vnom = base_voltages.get(obj["name"], ("Підстанція 10 кВ", 10.0))
+            norm = VOLTAGE_NORMS[vtype]
+            temp_stress = abs(temp - 15) / 55.0
+            deviation_range = norm["nom"] * 0.12 * temp_stress
+            deviation = _rnd.uniform(-deviation_range, deviation_range)
+            if "АВАРІЯ" in obj.get("status", ""):
+                deviation += norm["nom"] * _rnd.uniform(-0.15, -0.05)
+            elif "Попередження" in obj.get("status", ""):
+                deviation += norm["nom"] * _rnd.uniform(-0.08, 0.02)
+            return vtype, norm, round(vnom + deviation, 2)
+
+        alert_rows = []
+        for obj in st.session_state.objects:
+            vtype, norm, actual = simulate_voltage(obj, temperature)
+            status_ok = norm["low"] <= actual <= norm["high"]
+            deviation_pct = round((actual - norm["nom"]) / norm["nom"] * 100, 1)
+            alert_rows.append({"obj": obj, "vtype": vtype, "norm": norm,
+                                "actual": actual, "status_ok": status_ok, "deviation_pct": deviation_pct})
+
+        n_crit = sum(1 for r in alert_rows if not r["status_ok"] and "АВАРІЯ" in r["obj"].get("status",""))
+        n_warn = sum(1 for r in alert_rows if not r["status_ok"] and "Попередження" in r["obj"].get("status",""))
+        n_volt = sum(1 for r in alert_rows if not r["status_ok"] and r["obj"].get("status","") == "Нормальна")
+        n_ok   = sum(1 for r in alert_rows if r["status_ok"] and r["obj"].get("status","") == "Нормальна")
+
+        ac1, ac2, ac3, ac4 = st.columns(4)
+        ac1.metric("🔴 Критичні аварії",   n_crit)
+        ac2.metric("🟠 Попередження",       n_warn)
+        ac3.metric("🟡 Аномалії напруги",   n_volt)
+        ac4.metric("🟢 Об'єктів у нормі",   n_ok)
+
+        anomaly_rows = [r for r in alert_rows
+                        if not r["status_ok"] or r["obj"].get("status","") in ("АВАРІЯ","Попередження")]
+        normal_rows  = [r for r in alert_rows
+                        if r["status_ok"] and r["obj"].get("status","") == "Нормальна"]
+
+        if anomaly_rows:
+            st.markdown("#### ⚠️ Об'єкти поза межами норми:")
+            for row in anomaly_rows:
+                obj = row["obj"]
+                actual_v = row["actual"]
+                norm     = row["norm"]
+                dev      = row["deviation_pct"]
+                vtype    = row["vtype"]
+                obj_status = obj.get("status","Нормальна")
+
+                if "АВАРІЯ" in obj_status:
+                    border_color="#ef4444"; badge_bg="#7f1d1d"; badge_text="🔴 АВАРІЯ"; icon="🚨"
+                    rec = "Негайно направити ОВБ. Відключити пошкоджений вузол через SCADA. Перевірити живлення споживачів через резервне кільце."
+                elif "Попередження" in obj_status:
+                    border_color="#f59e0b"; badge_bg="#78350f"; badge_text="🟠 ПОПЕРЕДЖЕННЯ"; icon="⚠️"
+                    rec = "Призначити позапланову інспекцію. Перевірити ізоляцію та контактні з'єднання."
+                elif actual_v < norm["low"]:
+                    border_color="#facc15"; badge_bg="#713f12"; badge_text="🟡 АНОМАЛІЯ НАПРУГИ"; icon="⚡"
+                    rec = f"Напруга нижче норми ({actual_v} кВ < {norm['low']} кВ). Перевірити навантаження. Можливо потрібне секціонування."
+                else:
+                    border_color="#facc15"; badge_bg="#713f12"; badge_text="🟡 АНОМАЛІЯ НАПРУГИ"; icon="⚡"
+                    rec = f"Напруга вище норми ({actual_v} кВ > {norm['high']} кВ). Перевірити РПН трансформатора."
+
+                sign = "+" if dev >= 0 else ""
+                st.markdown(f"""
+                <div style="background:#1e293b;border-radius:10px;padding:0.9rem 1.2rem;
+                            margin-bottom:0.7rem;border:1px solid #334155;border-left:5px solid {border_color};">
+                  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
+                    <div>
+                      <span style="font-size:1.1rem;">{icon}</span>
+                      <b style="color:#f1f5f9;font-size:1rem;margin-left:6px;">{obj["name"]}</b>
+                      <span style="color:#64748b;font-size:0.82rem;margin-left:8px;">{vtype}</span>
+                    </div>
+                    <span style="background:{badge_bg};color:#fef2f2;border-radius:5px;padding:2px 10px;font-size:0.78rem;font-weight:600;">{badge_text}</span>
+                  </div>
+                  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;margin-top:0.7rem;font-size:0.83rem;">
+                    <div style="background:#0f172a;border-radius:6px;padding:0.5rem 0.7rem;">
+                      <div style="color:#64748b;">Напруга факт.</div>
+                      <div style="color:{border_color};font-weight:700;font-size:1rem;">{actual_v} кВ</div>
+                    </div>
+                    <div style="background:#0f172a;border-radius:6px;padding:0.5rem 0.7rem;">
+                      <div style="color:#64748b;">Норма (min–max)</div>
+                      <div style="color:#94a3b8;font-weight:600;">{norm["low"]}–{norm["high"]} кВ</div>
+                    </div>
+                    <div style="background:#0f172a;border-radius:6px;padding:0.5rem 0.7rem;">
+                      <div style="color:#64748b;">Відхилення</div>
+                      <div style="color:{border_color};font-weight:700;">{sign}{dev}%</div>
+                    </div>
+                  </div>
+                  <div style="margin-top:0.6rem;font-size:0.82rem;color:#94a3b8;">
+                    <span style="color:#60a5fa;font-weight:600;">🤖 SmartGrid AI:</span> {rec}
+                  </div>
+                  <div style="margin-top:0.4rem;font-size:0.78rem;color:#475569;">
+                    📌 {obj.get("subdivision","—")} · {obj.get("desc","—")[:90]}
+                  </div>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.success("✅ SmartGrid AI: Усі об'єкти функціонують у межах норми.")
+
+        if normal_rows:
+            with st.expander(f"✅ Об'єкти в нормі ({len(normal_rows)} шт.) — розгорнути"):
+                for row in normal_rows:
+                    obj = row["obj"]
+                    sign = "+" if row["deviation_pct"] >= 0 else ""
+                    st.markdown(
+                        f"**✅ {obj['name']}** — {row['vtype']} | "
+                        f"Напруга: `{row['actual']} кВ` | "
+                        f"Норма: `{row['norm']['low']}–{row['norm']['high']} кВ` | "
+                        f"Відхилення: `{sign}{row['deviation_pct']}%`"
+                    )
+
+        # Гістограма напруги
+        st.markdown("#### 📊 Гістограма напруги об'єктів vs Норма")
+        fig2, ax = plt.subplots(figsize=(10, 3.5))
+        fig2.patch.set_facecolor("#0f172a")
+        ax.set_facecolor("#1e293b")
+        names2   = [r["obj"]["name"] for r in alert_rows]
+        actuals2 = [r["actual"] / r["norm"]["nom"] * 100 for r in alert_rows]
+        bar_colors = []
+        for r in alert_rows:
+            if "АВАРІЯ" in r["obj"].get("status",""):
+                bar_colors.append("#ef4444")
+            elif not r["status_ok"]:
+                bar_colors.append("#f59e0b")
+            else:
+                bar_colors.append("#22c55e")
+        bars2 = ax.bar(names2, actuals2, color=bar_colors, width=0.55, edgecolor="#0f172a")
+        ax.axhline(y=100, color="#60a5fa", linestyle="--", linewidth=1.5, label="Номінал (100%)")
+        ax.axhline(y=90,  color="#f59e0b", linestyle=":", linewidth=1, alpha=0.7, label="Нижня межа норми (~90%)")
+        ax.axhline(y=110, color="#f59e0b", linestyle=":", linewidth=1, alpha=0.7, label="Верхня межа норми (~110%)")
+        ax.bar_label(bars2, fmt="%.1f%%", color="#cbd5e1", fontsize=8, padding=3)
+        ax.set_ylabel("% від номіналу", color="#64748b", fontsize=8)
+        ax.set_title(f"Напруга об'єктів (% від номіналу) при {temperature}°C", color="#f1f5f9", fontsize=9)
+        ax.tick_params(colors="#94a3b8", labelsize=8)
+        ax.spines[:].set_color("#334155")
+        ax.legend(fontsize=7.5, facecolor="#1e293b", edgecolor="#334155", labelcolor="#cbd5e1")
+        ax.set_ylim(75, 125)
+        plt.tight_layout()
+        st.pyplot(fig2)
+        plt.close(fig2)
+
+        # Підсумковий алерт
+        if overload_hours:
+            st.error(f"🚨 **SmartGrid AI попередження:** Прогнозується перевантаження мережі в години: **{', '.join(overload_hours)}**. "
+                     f"Рекомендується ввести обмеження навантаження або підключити резервні джерела живлення.")
+        elif underload_hours:
+            st.warning(f"⚠️ **SmartGrid AI:** Низьке навантаження в: **{', '.join(underload_hours)}**. Можливий аварійний режим.")
+        elif temperature <= -10 or temperature >= 32:
+            st.warning(f"⚠️ **SmartGrid AI:** Екстремальні погодні умови ({temperature}°C). "
+                       f"Рекомендується посилений моніторинг та підвищена готовність ОВБ.")
+        else:
+            st.success(f"✅ **SmartGrid AI:** Прогнозоване навантаження при {temperature}°C в межах норми. "
+                       f"Пікове навантаження: **{max(predicted_load)} МВт**.")
 
 # ==========================================
 # ВКЛАДКА: ЖУРНАЛ ПОДІЙ
@@ -886,18 +860,14 @@ if "analytics" in tab_map:
 if "log" in tab_map:
     with tab_map["log"]:
         st.title("📋 Цифровий журнал подій диспетчера")
-        
         df = pd.DataFrame(st.session_state.log_data)
-        
         col_f1, col_f2, col_f3 = st.columns(3)
         with col_f1: search_query = st.text_input("🔍 Швидкий фільтр за назвою об'єкта", "")
-        with col_f2: type_filter = st.selectbox("Тип події", ["Усі типи", "Аварія", "Планове ТО", "Ремонт", "Інспекція"])
-        with col_f3: crit_filter = st.selectbox("Ступінь критичності", ["Усі рівні", "Критична", "Висока", "Середня", "Низька"])
-            
+        with col_f2: type_filter = st.selectbox("Тип події", ["Усі типи","Аварія","Планове ТО","Ремонт","Інспекція"])
+        with col_f3: crit_filter = st.selectbox("Ступінь критичності", ["Усі рівні","Критична","Висока","Середня","Низька"])
         if type_filter != "Усі типи": df = df[df["Тип"] == type_filter]
         if crit_filter != "Усі рівні" and "Критичність" in df.columns: df = df[df["Критичність"] == crit_filter]
         if search_query: df = df[df["Об'єкт"].str.contains(search_query, case=False)]
-            
         st.dataframe(df, use_container_width=True, hide_index=True)
 
 # ==========================================
@@ -906,26 +876,21 @@ if "log" in tab_map:
 if "schedule" in tab_map:
     with tab_map["schedule"]:
         st.title("📅 Графік планового технічного обслуговування")
-        
         st.subheader("➕ Додати нове завдання до плану:")
         col_in1, col_in2, col_in3 = st.columns(3)
         with col_in1: plan_obj = st.selectbox("Вузол для ТО:", [o["name"] for o in st.session_state.objects])
         with col_in2: plan_date = st.date_input("Дата робіт", datetime.date.today() + datetime.timedelta(days=1))
         with col_in3: plan_desc = st.text_input("Опис регламентних робіт:", placeholder="Введіть опис робіт...")
-            
         if st.button("➕ Додати до графіка робіт", use_container_width=True):
             if plan_desc:
                 st.session_state.schedule_data.append({
-                    "Дата": str(plan_date),
-                    "Об'єкт": plan_obj,
-                    "Вид робіт": plan_desc,
-                    "Статус": "Заплановано"
+                    "Дата": str(plan_date), "Об'єкт": plan_obj,
+                    "Вид робіт": plan_desc, "Статус": "Заплановано"
                 })
                 st.success(f"✅ Роботи по {plan_obj} успішно додано!")
                 st.rerun()
             else:
                 st.error("Будь ласка, вкажіть вид робіт.")
-                
         st.divider()
         st.subheader("📋 Поточний графік робіт:")
         st.table(pd.DataFrame(st.session_state.schedule_data))
@@ -936,36 +901,23 @@ if "schedule" in tab_map:
 if "data" in tab_map:
     with tab_map["data"]:
         st.title("💾 Data-Центр синхронізації та обміну (Імпорт/Експорт)")
-        
         curr_df = pd.DataFrame(st.session_state.log_data)
         exp_col, imp_col = st.columns(2)
-        
         with exp_col:
             st.subheader("📤 Експорт даних із системи")
-            
             csv_data = curr_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Скачати Excel CSV (.csv)",
-                data=csv_data,
-                file_name="vinnitsaoblenergo_export.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-            
+            st.download_button(label="📥 Скачати Excel CSV (.csv)", data=csv_data,
+                               file_name="vinnitsaoblenergo_export.csv", mime="text/csv", use_container_width=True)
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 curr_df.to_excel(writer, index=False, sheet_name='Журнал Подій')
-            st.download_button(
-                label="📥 Скачати книгу MS Excel (.xlsx)",
-                data=buffer.getvalue(),
-                file_name="vinnitsaoblenergo_export.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-
+            st.download_button(label="📥 Скачати книгу MS Excel (.xlsx)", data=buffer.getvalue(),
+                               file_name="vinnitsaoblenergo_export.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                               use_container_width=True)
         with imp_col:
             st.subheader("📥 Імпорт зовнішніх даних")
-            uploaded_file = st.file_uploader("Оберіть файл конфігурації мережі", type=["csv", "xlsx", "json"])
+            uploaded_file = st.file_uploader("Оберіть файл конфігурації мережі", type=["csv","xlsx","json"])
             if uploaded_file is not None:
                 st.success("✅ Структуру файлу успішно розпізнано! Дані готові до інтеграції.")
 
@@ -976,26 +928,19 @@ if "users" in tab_map:
     with tab_map["users"]:
         st.title("👥 Управління правами доступу користувачів")
         st.info("ℹ️ Ця вкладка доступна виключно адміністраторам системи.")
-        
         st.subheader("📋 Поточні облікові записи системи")
-        
         users_display = []
         for login, data in USERS_DB.items():
             users_display.append({
-                "Логін": login,
-                "Ім'я та посада": data["display_name"],
-                "Підрозділ": data["subdivision"],
-                "Роль": ROLE_LABELS.get(data["role"], data["role"]),
+                "Логін": login, "Ім'я та посада": data["display_name"],
+                "Підрозділ": data["subdivision"], "Роль": ROLE_LABELS.get(data["role"], data["role"]),
                 "Доступні вкладки": ", ".join(
-                    t[0] for t in TAB_DEFINITIONS[ROLE_TO_TAB_SET.get(data["role"], "brigade_tabs")]
+                    t[0] for t in TAB_DEFINITIONS[ROLE_TO_TAB_SET.get(data["role"],"brigade_tabs")]
                 )
             })
-        
         st.dataframe(pd.DataFrame(users_display), use_container_width=True, hide_index=True)
-        
         st.divider()
         st.subheader("🔐 Матриця доступу за ролями")
-        
         matrix_data = []
         all_tabs = list(dict.fromkeys(t[0] for tabs in TAB_DEFINITIONS.values() for t in tabs))
         for role_key, role_label in ROLE_LABELS.items():
@@ -1005,5 +950,4 @@ if "users" in tab_map:
             for tab in all_tabs:
                 row[tab] = "✅" if tab in role_tabs else "🚫"
             matrix_data.append(row)
-        
         st.dataframe(pd.DataFrame(matrix_data).set_index("Роль"), use_container_width=True)
