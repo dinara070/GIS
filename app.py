@@ -67,10 +67,8 @@ with tab1:
     col_map, col_side = st.columns([2.3, 1])
     
     with col_map:
-        # Нова фіча: Симуляція режимів відображення мережі
         mode = st.radio("🛠️ Режим відображення шарів мережі:", ["Стандартний ГІС", "Вечірній максимум (Навантаження)", "Аварійні ділянки"], horizontal=True)
         
-        # Безпечна конвертація та рендеринг карти
         map_df = pd.DataFrame(st.session_state.objects)
         st.map(map_df, size=35)
         
@@ -91,41 +89,46 @@ with tab1:
         obj = st.session_state.selected_object
         st.subheader("ℹ️ Телеметрія та Управління")
         
-        st.markdown(f"### {obj['name']}")
-        if "АВАРІЯ" in obj['status']: st.error(f"Статус: {obj['status']}")
-        elif "Попередження" in obj['status']: st.warning(f"Статус: {obj['status']}")
-        else: st.success(f"Статус: {obj['status']}")
-            
-        st.markdown(f"**Важливість вузла:** `{obj['criticality']}`")
-        st.markdown(f"**Координати:** `{obj['latitude']:.4f}° N, {obj['longitude']:.4f}° E`")
-        st.markdown(f"**Опис та параметри:** {obj['desc']}")
+        st.markdown(f"### {obj.get('name', 'Невідомий об\'єкт')}")
         
-        # Нова фіча: Інструменти телеуправління SCADA для диспетчера
+        status = obj.get('status', 'Нормальна')
+        if "АВАРІЯ" in status: st.error(f"Статус: {status}")
+        elif "Попередження" in status: st.warning(f"Статус: {status}")
+        else: st.success(f"Статус: {status}")
+            
+        # БЕЗПЕЧНИЙ ПЕРЕГЛЯД КЛЮЧА КРИТИЧНОСТІ ЧЕРЕЗ .get()
+        criticality = obj.get('criticality', 'Середня')
+        st.markdown(f"**Важливість вузла:** `{criticality}`")
+        
+        st.markdown(f"**Тип:** {obj.get('type', 'Не вказано')}")
+        st.markdown(f"**Координати:** `{obj.get('latitude', 0.0):.4f}° N, {obj.get('longitude', 0.0):.4f}° E`")
+        st.markdown(f"**Опис та параметри:** {obj.get('desc', 'Опис відсутній')}")
+        
         st.divider()
         st.markdown("🎛️ **Дистанційне керування (SCADA):**")
         c1, c2 = st.columns(2)
         if c1.button("⚡ Вимкнути вимикач ВВ", use_container_width=True):
-            st.toast(f"🚨 Надіслано сигнал вимкнення на {obj['name']}!")
-            st.session_state.log_data.insert(0, {"Час": datetime.datetime.now().strftime("%d.%m %H:%M"), "Тип": "Ремонт", "Об'єкт": obj['name'], "Опис": "Дистанційне оперативне вимкнення вимикача диспетчером.", "Критичність": "Висока"})
+            st.toast(f"🚨 Надіслано сигнал вимкнення на {obj.get('name')}!")
+            st.session_state.log_data.insert(0, {"Час": datetime.datetime.now().strftime("%d.%m %H:%M"), "Тип": "Ремонт", "Об'єкт": obj.get('name'), "Опис": "Дистанційне оперативне вимкнення вимикача диспетчером.", "Критичність": "Висока"})
         if c2.button("🟢 Увімкнути АВР", use_container_width=True):
-            st.success(f"Автоматика резерву на {obj['name']} активна.")
+            st.success(f"Автоматика резерву на {obj.get('name', 'об\'єкті')} активна.")
             
         st.divider()
         st.markdown("📲 **Комунікаційний хаб:**")
         if st.button("📲 Надіслати оперативний наряд бригаді", use_container_width=True):
-            st.toast(f"📡 API: Наряд для {obj['name']} надіслано в польовий додаток!")
+            st.toast(f"📡 API: Наряд для {obj.get('name')} надіслано в польовий додаток!")
             
-        permit_text = f"НАРЯД-ДОПУСК №{obj['name']}-2026\nОб'єкт: {obj['name']} ({obj['type']})\nКритичність: {obj['criticality']}\nКоординати: {obj['latitude']}, {obj['longitude']}\nОпис: {obj['desc']}\nЗгенеровано системою Вінницяобленерго."
+        permit_text = f"НАРЯД-ДОПУСК №{obj.get('name', 'ТП')}-2026\nОб'єкт: {obj.get('name')} ({obj.get('type')})\nКритичність: {criticality}\nКоординати: {obj.get('latitude')}, {obj.get('longitude')}\nОпис: {obj.get('desc')}\nЗгенеровано системою Вінницяобленерго."
         st.download_button(
             label="📄 Завантажити Наряд-Допуск (.txt)",
             data=permit_text,
-            file_name=f"permit_{obj['name']}.txt",
+            file_name=f"permit_{obj.get('name', 'TP')}.txt",
             mime="text/plain",
             use_container_width=True
         )
 
 # ==========================================
-# ВКАДКА 2: МОБІЛЬНИЙ КЛІЄНТ (З ЧЕК-ЛИСТОМ ТБ)
+# ВКАДКА 2: МОБІЛЬНИЙ КЛІЄНТ
 # ==========================================
 with tab2:
     st.title("📱 Цифровий кабінет лінійної бригади")
@@ -136,7 +139,7 @@ with tab2:
         st.info("👷 Бригада №1 (ОВБ Центр) | GPS: Активний")
         
         if st.session_state.task_closed:
-            st.success("🎉 Звіт успішно відправлено на сервер! Очікуйте нових розпоряджень.")
+            st.success("🎉 Звіт успішно відправлено на server! Очікуйте нових розпоряджень.")
             if st.button("🔄 Оновити та отримати нове завдання"):
                 st.session_state.task_closed = False
                 st.rerun()
@@ -174,23 +177,20 @@ with tab2:
         st.markdown("---")
 
 # ==========================================
-# ВКАДКА 3: АНАЛІТИКА ТА ГАЛУЗЕВІ KPI (SAIDI / SAIFI)
+# ВКАДКА 3: АНАЛІТИКА
 # ==========================================
 with tab3:
     st.title("📊 Аналітичний комплекс та розрахунок надійності SAIDI/SAIFI")
     
-    # Розрахунок метрик
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Індекс SAIDI (сер. час вимкнення)", "42.5 хв/рік", "-3.2 хв від плану", delta_color="inverse")
-    m2.metric("Індекс SAIFI (сер. частота вимкнень)", "1.14 од/рік", "+0.02", delta_color="inverse")
+    m1.metric("Індекс SAIDI", "42.5 хв/рік", "-3.2 хв від плану", delta_color="inverse")
+    m2.metric("Індекс SAIFI", "1.14 од/рік", "+0.02", delta_color="inverse")
     m3.metric("Загальна потужність споживання", "148.5 МВт", "Норма")
     m4.metric("Коефіцієнт корисного використання", "94.2%", "+0.5%")
     
-    # Графіки
     st.markdown("### 📈 Прогнозування добового навантаження мережі та Аварійність")
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
     
-    # Лінійний графік прогнозу споживання
     hours = [f"{i}:00" for i in range(0, 25, 4)]
     actual_load = [65, 50, 85, 110, 140, 148, 90]
     predicted_load = [62, 53, 80, 115, 138, 145, 95]
@@ -200,45 +200,33 @@ with tab3:
     ax1.legend()
     ax1.grid(True, alpha=0.2)
     
-    # Діаграма структури подій
     current_logs_df = pd.DataFrame(st.session_state.log_data)
     types_distribution = current_logs_df["Тип"].value_counts()
     ax2.pie(types_distribution.values, labels=types_distribution.index, colors=['#ef4444', '#f59e0b', '#10b981', '#38bdf8', '#bc5090'], autopct='%1.1f%%', startangle=90)
     ax2.set_title("Розподіл подій у журналі", fontsize=10)
-    
     st.pyplot(fig)
 
 # ==========================================
-# ВКАДКА 4: ЖУРНАЛ ПОДІЙ З СТУПЕНЕМ КРИТИЧНОСТІ
+# ВКАДКА 4: ЖУРНАЛ ПОДІЙ
 # ==========================================
 with tab4:
     st.title("📋 Розширений журнал обліку подій")
     
     df = pd.DataFrame(st.session_state.log_data)
     
-    # Фільтрація
     col_f1, col_f2, col_f3 = st.columns(3)
     with col_f1: search_query = st.text_input("🔍 Швидкий фільтр за назвою об'єкта", "")
     with col_f2: type_filter = st.selectbox("Тип події", ["Усі типи", "Аварія", "Планове ТО", "Ремонт", "Інспекція"])
     with col_f3: crit_filter = st.selectbox("Ступінь критичності", ["Усі рівні", "Критична", "Висока", "Середня", "Низька"])
         
     if type_filter != "Усі типи": df = df[df["Тип"] == type_filter]
-    if crit_filter != "Усі рівні": df = df[df["Критичність"] == crit_filter]
+    if crit_filter != "Усі рівні" and "Критичність" in df.columns: df = df[df["Критичність"] == crit_filter]
     if search_query: df = df[df["Об'єкт"].str.contains(search_query, case=False)]
         
-    # Виведення датафрейму
-    st.dataframe(
-        df, 
-        use_container_width=True, 
-        hide_index=True,
-        column_config={
-            "Критичність": st.column_config.TextColumn("⚠️ Критичність", help="Рівень важливості для реагування"),
-            "Тип": st.column_config.TextColumn("Категорія"),
-        }
-    )
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
 # ==========================================
-# ВКАДКА 5: ІНТЕРАКТИВНЕ ПЛАНУВАННЯ ТО
+# ВКАДКА 5: ПЛАНУВАННЯ ТО
 # ==========================================
 with tab5:
     st.title("📅 Планувальник ремонтів та Технічного Обслуговування")
@@ -268,11 +256,10 @@ with tab5:
     st.table(sched_df)
 
 # ==========================================
-# ВКАДКА 6: DATA ЦЕНТР (ІМПОРТ / ЕКСПОРТ)
+# ВКАДКА 6: DATA ЦЕНТР
 # ==========================================
 with tab6:
     st.title("💾 Data-Центр синхронізації та обміну")
-    st.markdown("Експорт поточного логу системи для звітності керівництву або завантаження сторонніх файлів конфігурацій.")
     
     curr_df = pd.DataFrame(st.session_state.log_data)
     exp_col, imp_col = st.columns(2)
