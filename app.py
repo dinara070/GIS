@@ -15,15 +15,16 @@ st.set_page_config(
 plt.style.use('dark_background')
 
 # --- ІНІЦІАЛІЗАЦІЯ ДАНИХ У СЕСІЇ ---
+# Ключі змінено на 'latitude' та 'longitude' для автоматичного розпізнавання картою
 if "objects" not in st.session_state:
     st.session_state.objects = [
-        {"name": "ТП-12", "type": "Підстанція", "status": "Нормальна", "desc": "ВН-110 кВ, Навантаження: 70%. Ремонтів: 3. Останній: 2023-06", "lat": 49.2331, "lon": 28.4682, "color": "#10b981"},
-        {"name": "ТП-28", "type": "Підстанція", "status": "Нормальна", "desc": "ВН-35 кВ, Навантаження: 45%. Ремонтів: 1. Останній: 2024-03", "lat": 49.2425, "lon": 28.4810, "color": "#10b981"},
-        {"name": "ТП-245", "type": "Підстанція", "status": "АВАРІЯ", "desc": "ВН-10 кВ, Навантаження: 95%! Потребує термінової заміни! Ремонтів: 7.", "lat": 49.2210, "lon": 28.4422, "color": "#ef4444"},
-        {"name": "ТП-67", "type": "Підстанція", "status": "Нормальна", "desc": "ВН-35 кВ, Навантаження: 30%. Новий об'єкт.", "lat": 49.2512, "lon": 28.4935, "color": "#10b981"},
-        {"name": "Оп. №8", "type": "Опора", "status": "Норма", "desc": "ЖБ СВ-110. Задовільний стан. Огляд: 2024-01", "lat": 49.2295, "lon": 28.4550, "color": "#38bdf8"},
-        {"name": "Оп. №9", "type": "Опора", "status": "Попередження", "desc": "Пошкоджено ізолятор після грози. Рекомендовано ремонт.", "lat": 49.2310, "lon": 28.4585, "color": "#f59e0b"},
-        {"name": "Оп. №10", "type": "Опора", "status": "Норма", "desc": "ЖБ СВ-110. Огляд: 2024-05. Норма", "lat": 49.2325, "lon": 28.4610, "color": "#38bdf8"},
+        {"name": "ТП-12", "type": "Підстанція", "status": "Нормальна", "desc": "ВН-110 кВ, Навантаження: 70%. Ремонтів: 3. Останній: 2023-06", "latitude": 49.2331, "longitude": 28.4682},
+        {"name": "ТП-28", "type": "Підстанція", "status": "Нормальна", "desc": "ВН-35 кВ, Навантаження: 45%. Ремонтів: 1. Останній: 2024-03", "latitude": 49.2425, "longitude": 28.4810},
+        {"name": "ТП-245", "type": "Підстанція", "status": "АВАРІЯ", "desc": "ВН-10 кВ, Навантаження: 95%! Потребує термінової заміни! Ремонтів: 7.", "latitude": 49.2210, "longitude": 28.4422},
+        {"name": "ТП-67", "type": "Підстанція", "status": "Нормальна", "desc": "ВН-35 кВ, Навантаження: 30%. Новий об'єкт.", "latitude": 49.2512, "longitude": 28.4935},
+        {"name": "Оп. №8", "type": "Опора", "status": "Норма", "desc": "ЖБ СВ-110. Задовільний стан. Огляд: 2024-01", "latitude": 49.2295, "longitude": 28.4550},
+        {"name": "Оп. №9", "type": "Опора", "status": "Попередження", "desc": "Пошкоджено ізолятор після грози. Рекомендовано ремонт.", "latitude": 49.2310, "longitude": 28.4585},
+        {"name": "Оп. №10", "type": "Опора", "status": "Норма", "desc": "ЖБ СВ-110. Огляд: 2024-05. Норма", "latitude": 49.2325, "longitude": 28.4610},
     ]
 
 if "log_data" not in st.session_state:
@@ -61,14 +62,15 @@ with tab1:
     with col_map:
         st.subheader("🗺️ Інтерактивна ГІС-карта енергомережі")
         
-        # Конвертація у DataFrame для відображення на вбудованій карті Streamlit
+        # Конвертація у DataFrame
         map_df = pd.DataFrame(st.session_state.objects)
-        st.map(map_df, latitude="lat", longitude="lon", color="color", size=40)
+        
+        # БЕЗПЕЧНИЙ ВИКЛИК КАРТИ: Streamlit автоматично підтягне стовпці 'latitude' та 'longitude'
+        st.map(map_df, size=30)
         
         st.markdown("##### 🔍 Швидкий вибір об'єкта зі списку:")
         obj_names = [o["name"] for o in st.session_state.objects]
         
-        # Знаходимо поточний індекс вибраного об'єкта
         try:
             curr_index = obj_names.index(st.session_state.selected_object["name"])
         except ValueError:
@@ -76,7 +78,6 @@ with tab1:
             
         selected_name = st.selectbox("Оберіть вузол для виведення телеметрії:", obj_names, index=curr_index)
         
-        # Оновлюємо вибраний об'єкт на рівні сесії
         for o in st.session_state.objects:
             if o["name"] == selected_name:
                 st.session_state.selected_object = o
@@ -94,7 +95,7 @@ with tab1:
             st.success(f"Статус: {obj['status']}")
             
         st.markdown(f"**Тип:** {obj['type']}")
-        st.markdown(f"**Координати:** `{obj['lat']:.4f}° N, {obj['lon']:.4f}° E`")
+        st.markdown(f"**Координати:** `{obj['latitude']:.4f}° N, {obj['longitude']:.4f}° E`")
         st.markdown(f"**Опис:** {obj['desc']}")
         
         st.divider()
@@ -106,7 +107,7 @@ with tab1:
             
         st.divider()
         st.markdown("📄 **Генератор документів:**")
-        permit_text = f"НАРЯД-ДОПУСК №{obj['name']}-2026\nОб'єкт: {obj['name']} ({obj['type']})\nСтатус: {obj['status']}\nКоординати: {obj['lat']}, {obj['lon']}\nСпецифікація: {obj['desc']}\nВідповідальний керівник: Іваненко М.\nДата створення: 23.05.2026"
+        permit_text = f"НАРЯД-ДОПУСК №{obj['name']}-2026\nОб'єкт: {obj['name']} ({obj['type']})\nСтатус: {obj['status']}\nКоординати: {obj['latitude']}, {obj['longitude']}\nСпецифікація: {obj['desc']}\nВідповідальний керівник: Іваненко М.\nДата створення: 23.05.2026"
         st.download_button(
             label="📄 Завантажити Наряд-Допуск (.txt)",
             data=permit_text,
@@ -136,8 +137,7 @@ with tab2:
             sub_tab1, sub_tab2, sub_tab3 = st.tabs(["🗺️ Навігація", "📄 ГІС Паспорт", "📥 Звіт"])
             with sub_tab1:
                 st.write("⏱️ Розрахунковий час прибуття: 11 хв | 📏 Відстань: 1.8 км")
-                # ДОДАНО НА МІЙ РОЗСУД: Локальна мапа для виїзної бригади
-                crew_loc = pd.DataFrame([{"lat": 49.2210, "lon": 28.4422}])
+                crew_loc = pd.DataFrame([{"latitude": 49.2210, "longitude": 28.4422}])
                 st.map(crew_loc, zoom=14, size=20)
             with sub_tab2:
                 st.code("Тип: ВН-10 кВ\nТрансформатор: ТМ-400/10\nРік встановлення: 2001\nЗапобіжники: ПК-10, 3×25А", language="text")
@@ -157,7 +157,6 @@ with tab2:
 with tab3:
     st.title("📊 Апарат інтелектуальної аналітики")
     
-    # ДОДАНО НА МІЙ РОЗСУД: Динамічний підрахунок кількості аварій на основі логу даних
     current_logs_df = pd.DataFrame(st.session_state.log_data)
     active_alarms_count = len(current_logs_df[current_logs_df["Тип"] == "Аварія"])
     
@@ -173,7 +172,6 @@ with tab3:
     ax1.bar(categories, values, color=['#ef4444', '#f59e0b', '#38bdf8', '#10b981'])
     ax1.set_title("Аварії за типами об'єктів (2026)", fontsize=10)
     
-    # Розподіл за реальними даними з логу
     types_distribution = current_logs_df["Тип"].value_counts()
     ax2.pie(types_distribution.values, labels=types_distribution.index, colors=['#ef4444', '#f59e0b', '#10b981', '#38bdf8', '#bc5090'], autopct='%1.1f%%', startangle=90)
     ax2.set_title("Поточна структура журналу подій", fontsize=10)
@@ -226,7 +224,6 @@ with tab6:
     with exp_col:
         st.subheader("📤 Експорт даних із системи")
         
-        # 1. Експорт в CSV
         csv_data = curr_df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 Скачати у форматі Excel CSV (.csv)",
@@ -236,7 +233,6 @@ with tab6:
             use_container_width=True
         )
         
-        # 2. Експорт в Excel
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             curr_df.to_excel(writer, index=False, sheet_name='Журнал Подій')
@@ -248,7 +244,6 @@ with tab6:
             use_container_width=True
         )
         
-        # 3. Експорт в JSON
         json_string = json.dumps(st.session_state.log_data, indent=4, ensure_ascii=False)
         st.download_button(
             label="📥 Скачати у структурному форматі ГІС JSON (.json)",
