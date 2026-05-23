@@ -5,9 +5,16 @@ import json
 import io
 import datetime
 
+try:
+    import folium
+    from streamlit_folium import st_folium
+    FOLIUM_AVAILABLE = True
+except ImportError:
+    FOLIUM_AVAILABLE = False
+
 # --- НАЛАШТУВАННЯ СТОРІНКИ ---
 st.set_page_config(
-    page_title="ГІС Диспетчерська Система Регіональних Електромереж v4.0",
+    page_title="ГІС Диспетчерська Система Регіональних Електромереж v5.0",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -235,26 +242,267 @@ rendered_tabs = st.tabs(tab_labels)
 tab_map = dict(zip(tab_keys, rendered_tabs))
 
 # ==========================================
+# ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ FOLIUM ГІС
+# ==========================================
+
+# Кольори маркерів за статусом об'єкта
+def get_marker_color(status: str) -> str:
+    if "АВАРІЯ" in status:   return "red"
+    if "Попередження" in status: return "orange"
+    return "green"
+
+# Іконки за типом об'єкта
+def get_marker_icon(obj_type: str) -> str:
+    icons = {
+        "Підстанція":       "bolt",
+        "Опора":            "map-pin",
+        "Центр клієнтів":   "users",
+    }
+    return icons.get(obj_type, "circle-info")
+
+# HTML-рядок для pop-up вікна
+def build_popup_html(obj: dict) -> str:
+    status = obj.get("status", "Нормальна")
+    color_map = {"АВАРІЯ": "#ef4444", "Попередження": "#f59e0b", "Нормальна": "#10b981"}
+    badge_color = next((v for k, v in color_map.items() if k in status), "#10b981")
+    return f"""
+    <div style="font-family:sans-serif;min-width:230px;padding:4px 2px">
+      <b style="font-size:14px">{obj['name']}</b>
+      <span style="float:right;background:{badge_color};color:#fff;border-radius:4px;
+                   padding:1px 7px;font-size:11px">{status}</span>
+      <hr style="margin:6px 0">
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <tr><td style="color:#666;padding:2px 0">Тип:</td>
+            <td><b>{obj.get('type','—')}</b></td></tr>
+        <tr><td style="color:#666;padding:2px 0">Критичність:</td>
+            <td><b>{obj.get('criticality','—')}</b></td></tr>
+        <tr><td style="color:#666;padding:2px 0">СО:</td>
+            <td>{obj.get('subdivision','—')}</td></tr>
+        <tr><td style="color:#666;padding:2px 0;vertical-align:top">Опис:</td>
+            <td style="color:#333">{obj.get('desc','—')}</td></tr>
+        <tr><td style="color:#666;padding:2px 0">Координати:</td>
+            <td>{obj.get('latitude',0):.4f}° N, {obj.get('longitude',0):.4f}° E</td></tr>
+      </table>
+    </div>
+    """
+
+# Побудова Folium-карти
+def build_folium_map(objects: list, active_layers: list) -> "folium.Map":
+    # Центр — Вінницька область
+    fmap = folium.Map(
+        location=[49.0, 28.4],
+        zoom_start=8,
+        tiles="CartoDB dark_matter"
+    )
+
+    # ---- ШАР: Зони обслуговування СО (приблизні полігони) ----
+    if "Зони СО" in active_layers:
+        SO_ZONES = [
+            {
+                "name": "СО «Вінницькі міські ЕМ»",
+                "color": "#38bdf8",
+                "coords": [
+                    [49.28, 28.35], [49.28, 28.58],
+                    [49.18, 28.58], [49.18, 28.35]
+                ]
+            },
+            {
+                "name": "СО «Жмеринські ЕМ» (вкл. Шаргород)",
+                "color": "#a855f7",
+                "coords": [
+                    [48.85, 27.75], [48.85, 28.25],
+                    [48.60, 28.25], [48.60, 27.75]
+                ]
+            },
+            {
+                "name": "СО «Хмільницькі ЕМ»",
+                "color": "#f59e0b",
+                "coords": [
+                    [49.60, 28.35], [49.60, 28.75],
+                    [49.35, 28.75], [49.35, 28.35]
+                ]
+            },
+            {
+                "name": "СО «Гайсинські ЕМ»",
+                "color": "#10b981",
+                "coords": [
+                    [48.95, 29.25], [48.95, 29.75],
+                    [48.65, 29.75], [48.65, 29.25]
+                ]
+            },
+        ]
+        zone_group = folium.FeatureGroup(name="🗺️ Зони обслуговування СО", show=True)
+        for zone in SO_ZONES:
+            folium.Polygon(
+                locations=zone["coords"],
+                color=zone["color"],
+                fill=True,
+                fill_color=zone["color"],
+                fill_opacity=0.10,
+                weight=2,
+                dash_array="8 4",
+                tooltip=folium.Tooltip(zone["name"], sticky=True),
+                popup=folium.Popup(f"<b>{zone['name']}</b>", max_width=200)
+            ).add_to(zone_group)
+        zone_group.add_to(fmap)
+
+    # ---- ШАР: Лінії ЛЕП ----
+    if "ЛЕП" in active_layers:
+        lep_group = folium.FeatureGroup(name="⚡ Лінії ЛЕП", show=True)
+        LEP_LINES = [
+            # 110 кВ  — ТП-12 → ТП-28
+            {
+                "coords": [[49.2331, 28.4682], [49.2425, 28.4810]],
+                "color": "#facc15", "weight": 4, "dash": None,
+                "label": "ЛЕП 110 кВ: ТП-12 → ТП-28"
+            },
+            # 35 кВ   — ТП-28 → ТП-245
+            {
+                "coords": [[49.2425, 28.4810], [49.2210, 28.4422]],
+                "color": "#fb923c", "weight": 3, "dash": "6 3",
+                "label": "ЛЕП 35 кВ: ТП-28 → ТП-245 (АВАРІЯ)"
+            },
+            # 10 кВ   — ТП-Шаргород-100 → ЦОК Шаргород
+            {
+                "coords": [[48.7364, 28.0822], [48.7390, 28.0805]],
+                "color": "#4ade80", "weight": 2, "dash": "3 3",
+                "label": "КЛ 10 кВ: ТП-Шаргород-100 → ЦОК"
+            },
+            # Магістраль 110 кВ — Вінниця → Хмільник
+            {
+                "coords": [[49.2331, 28.4682], [49.4410, 28.5122]],
+                "color": "#facc15", "weight": 4, "dash": None,
+                "label": "ЛЕП 110 кВ: Вінниця → Калинів (Хмільник)"
+            },
+            # Магістраль 35 кВ — Вінниця → Шаргород
+            {
+                "coords": [[49.2331, 28.4682], [48.7364, 28.0822]],
+                "color": "#fb923c", "weight": 2, "dash": "8 4",
+                "label": "ЛЕП 35 кВ: Вінниця → Шаргород"
+            },
+        ]
+        for lep in LEP_LINES:
+            folium.PolyLine(
+                locations=lep["coords"],
+                color=lep["color"],
+                weight=lep["weight"],
+                dash_array=lep.get("dash"),
+                tooltip=folium.Tooltip(lep["label"], sticky=True),
+                opacity=0.85
+            ).add_to(lep_group)
+        lep_group.add_to(fmap)
+
+    # ---- ШАР: Маркери об'єктів ----
+    if "Об'єкти" in active_layers:
+        obj_group = folium.FeatureGroup(name="📍 Об'єкти мережі", show=True)
+        for obj in objects:
+            lat = obj.get("latitude")
+            lon = obj.get("longitude")
+            if lat is None or lon is None:
+                continue
+
+            color = get_marker_color(obj.get("status", "Нормальна"))
+            icon  = get_marker_icon(obj.get("type", ""))
+
+            # Пульсуюче коло для аварій
+            if "АВАРІЯ" in obj.get("status", ""):
+                folium.CircleMarker(
+                    location=[lat, lon],
+                    radius=18,
+                    color="#ef4444",
+                    fill=True,
+                    fill_color="#ef4444",
+                    fill_opacity=0.20,
+                    weight=2,
+                ).add_to(obj_group)
+
+            folium.Marker(
+                location=[lat, lon],
+                tooltip=folium.Tooltip(
+                    f"<b>{obj['name']}</b><br>{obj.get('type','')}<br>Статус: {obj.get('status','')}",
+                    sticky=True
+                ),
+                popup=folium.Popup(build_popup_html(obj), max_width=300),
+                icon=folium.Icon(
+                    color=color,
+                    icon=icon,
+                    prefix="fa"
+                )
+            ).add_to(obj_group)
+
+        obj_group.add_to(fmap)
+
+    # ---- Легенда ----
+    legend_html = """
+    <div style="position:fixed;bottom:30px;left:30px;z-index:9999;
+                background:#1e293b;color:#f1f5f9;padding:12px 16px;
+                border-radius:8px;font-size:12px;border:1px solid #334155;
+                box-shadow:0 2px 8px rgba(0,0,0,.5)">
+      <b style="font-size:13px">Легенда</b><br>
+      <span style="color:#ef4444">●</span> Аварія &nbsp;
+      <span style="color:#f97316">●</span> Попередження &nbsp;
+      <span style="color:#22c55e">●</span> Норма<br>
+      <span style="color:#facc15">━━</span> ЛЕП 110 кВ &nbsp;
+      <span style="color:#fb923c">╌╌</span> ЛЕП 35 кВ &nbsp;
+      <span style="color:#4ade80">╌╌</span> КЛ 10 кВ<br>
+      <span style="opacity:.6">░░░</span> Зона обслуговування СО
+    </div>
+    """
+    fmap.get_root().html.add_child(folium.Element(legend_html))
+    folium.LayerControl(collapsed=False).add_to(fmap)
+    return fmap
+
+
+# ==========================================
 # ВКЛАДКА: ДИСПЕТЧЕР МАПИ
 # ==========================================
 if "map" in tab_map:
     with tab_map["map"]:
-        st.title("🏢 Оперативний диспетчерський пульт ГІС")
+        st.title("🗺️ Оперативний диспетчерський пульт ГІС")
+
+        if not FOLIUM_AVAILABLE:
+            st.warning(
+                "⚠️ Бібліотеки `folium` та `streamlit-folium` не встановлені. "
+                "Виконайте: `pip install folium streamlit-folium`"
+            )
+
         col_map, col_side = st.columns([2.3, 1])
-        
+
         with col_map:
-            mode = st.radio("🛠️ Шари візуалізації мережі:", ["Стандартний ГІС", "Зони структурних одиниць (СО)"], horizontal=True)
-            map_df = pd.DataFrame(st.session_state.objects)
-            st.map(map_df, size=40)
-            
-            st.markdown("##### 🔍 Швидкий вибір ГІС об'єкта області:")
+            st.markdown("##### 🛠️ Активні шари карти:")
+            layer_cols = st.columns(3)
+            show_objects = layer_cols[0].checkbox("📍 Об'єкти мережі",   value=True)
+            show_lep     = layer_cols[1].checkbox("⚡ Лінії ЛЕП",       value=True)
+            show_zones   = layer_cols[2].checkbox("🗺️ Зони СО",         value=False)
+
+            active_layers = []
+            if show_objects: active_layers.append("Об'єкти")
+            if show_lep:     active_layers.append("ЛЕП")
+            if show_zones:   active_layers.append("Зони СО")
+
+            if FOLIUM_AVAILABLE:
+                fmap = build_folium_map(st.session_state.objects, active_layers)
+                map_result = st_folium(fmap, width="100%", height=520, returned_objects=["last_object_clicked_popup"])
+
+                # Якщо клацнули маркер — автовибір об'єкта в правій панелі
+                clicked_popup = (map_result or {}).get("last_object_clicked_popup")
+                if clicked_popup:
+                    for o in st.session_state.objects:
+                        if o["name"] in str(clicked_popup):
+                            st.session_state.selected_object = o
+                            break
+            else:
+                map_df = pd.DataFrame(st.session_state.objects)
+                st.map(map_df, size=40)
+
+            st.markdown("##### 🔍 Вибір об'єкта для телеметрії:")
             obj_names = [o["name"] for o in st.session_state.objects]
             try:
                 curr_index = obj_names.index(st.session_state.selected_object["name"])
             except ValueError:
                 curr_index = 0
-                
-            selected_name = st.selectbox("Оберіть вузол для виведення телеметрії:", obj_names, index=curr_index)
+
+            selected_name = st.selectbox("Оберіть вузол:", obj_names, index=curr_index)
             for o in st.session_state.objects:
                 if o["name"] == selected_name:
                     st.session_state.selected_object = o
@@ -263,18 +511,18 @@ if "map" in tab_map:
             obj = st.session_state.selected_object
             st.subheader("ℹ️ Телеметрія та Управління")
             st.markdown(f"### {obj.get('name', 'Невідомий об\'єкт')}")
-            
+
             status = obj.get('status', 'Нормальна')
-            if "АВАРІЯ" in status: st.error(f"Статус: {status}")
+            if "АВАРІЯ" in status:       st.error(f"Статус: {status}")
             elif "Попередження" in status: st.warning(f"Статус: {status}")
-            else: st.success(f"Статус: {status}")
-                
+            else:                          st.success(f"Статус: {status}")
+
             criticality = obj.get('criticality', 'Середня')
             st.markdown(f"**Підпорядкування:** `{obj.get('subdivision', 'Центральний апарат')}`")
             st.markdown(f"**Важливість вузла:** `{criticality}`")
             st.markdown(f"**Координати:** `{obj.get('latitude', 0.0):.4f}° N, {obj.get('longitude', 0.0):.4f}° E`")
             st.markdown(f"**Технічні параметри:** {obj.get('desc', 'Немає опису')}")
-            
+
             st.divider()
             st.markdown("🎛️ **Команди дистанційного керування:**")
             if st.button("⚡ Вимкнути фідер (SCADA)", use_container_width=True):
@@ -286,11 +534,20 @@ if "map" in tab_map:
                     "Опис": f"Дистанційне оперативне керування. Оператор: {current_user['display_name']}",
                     "Критичність": "Висока"
                 })
-                
+
             if st.button("📲 Передати наряд черговому майстру дільниці", use_container_width=True):
                 st.toast(f"📡 Дані надіслано в базу відповідної структурної одиниці ЕМ!")
-                
-            permit_text = f"НАРЯД-ДОПУСК №{obj.get('name', 'ТП')}-2026\nОб'єкт: {obj.get('name')} ({obj.get('type')})\nПідрозділ: {obj.get('subdivision')}\nКритичність: {criticality}\nКоординати: {obj.get('latitude')}, {obj.get('longitude')}\nОпис: {obj.get('desc')}\nВидав: {current_user['display_name']}\nЗгенеровано системою Вінницяобленерго."
+
+            permit_text = (
+                f"НАРЯД-ДОПУСК №{obj.get('name', 'ТП')}-2026\n"
+                f"Об'єкт: {obj.get('name')} ({obj.get('type')})\n"
+                f"Підрозділ: {obj.get('subdivision')}\n"
+                f"Критичність: {criticality}\n"
+                f"Координати: {obj.get('latitude')}, {obj.get('longitude')}\n"
+                f"Опис: {obj.get('desc')}\n"
+                f"Видав: {current_user['display_name']}\n"
+                f"Згенеровано системою Вінницяобленерго."
+            )
             st.download_button(
                 label="📄 Завантажити Наряд-Допуск (.txt)",
                 data=permit_text,
@@ -368,11 +625,37 @@ if "structure" in tab_map:
             """)
             
             st.caption("🗺️ Локація сервісної інфраструктури в м. Шаргород:")
-            sh_df = pd.DataFrame([
-                {"name": "ТП-Шаргород-100", "latitude": 48.7364, "longitude": 28.0822},
-                {"name": "ЦОК Шаргород", "latitude": 48.7390, "longitude": 28.0805}
-            ])
-            st.map(sh_df, zoom=13, size=45)
+            if FOLIUM_AVAILABLE:
+                sh_map = folium.Map(location=[48.7377, 28.0813], zoom_start=15, tiles="CartoDB dark_matter")
+                sh_objects = [
+                    {"name": "ТП-Шаргород-100", "latitude": 48.7364, "longitude": 28.0822,
+                     "type": "Підстанція", "status": "Нормальна", "criticality": "Висока",
+                     "subdivision": "СО «Жмеринські ЕМ»", "desc": "ВН-35/10 кВ. Шаргородська дільниця."},
+                    {"name": "ЦОК Шаргород", "latitude": 48.7390, "longitude": 28.0805,
+                     "type": "Центр клієнтів", "status": "Нормальна", "criticality": "Низька",
+                     "subdivision": "СО «Жмеринські ЕМ»", "desc": "Прийом споживачів."},
+                ]
+                for o in sh_objects:
+                    folium.Marker(
+                        location=[o["latitude"], o["longitude"]],
+                        tooltip=o["name"],
+                        popup=folium.Popup(build_popup_html(o), max_width=280),
+                        icon=folium.Icon(color=get_marker_color(o["status"]),
+                                        icon=get_marker_icon(o["type"]), prefix="fa")
+                    ).add_to(sh_map)
+                # КЛ між об'єктами
+                folium.PolyLine(
+                    [[48.7364, 28.0822], [48.7390, 28.0805]],
+                    color="#4ade80", weight=2, dash_array="4 3",
+                    tooltip="КЛ 10 кВ: ТП-100 → ЦОК"
+                ).add_to(sh_map)
+                st_folium(sh_map, width="100%", height=300, returned_objects=[])
+            else:
+                sh_df = pd.DataFrame([
+                    {"name": "ТП-Шаргород-100", "latitude": 48.7364, "longitude": 28.0822},
+                    {"name": "ЦОК Шаргород", "latitude": 48.7390, "longitude": 28.0805}
+                ])
+                st.map(sh_df, zoom=13, size=45)
 
 # ==========================================
 # ВКЛАДКА: АНАЛІТИКА ТА KPI
