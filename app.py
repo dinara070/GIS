@@ -204,7 +204,8 @@ if "task_closed" not in st.session_state:
 # Визначаємо, які вкладки доступні для кожної ролі
 TAB_DEFINITIONS = {
     "dispatcher_tabs": [
-        ("🏢 Диспетчер мапи", "map"),
+        ("🏠 Головна", "home"),
+        ("🗺️ Диспетчер мапи", "map"),
         ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"),
         ("📊 Аналітика та KPI", "analytics"),
@@ -212,7 +213,8 @@ TAB_DEFINITIONS = {
         ("📅 Планування ТО", "schedule"),
     ],
     "admin_tabs": [
-        ("🏢 Диспетчер мапи", "map"),
+        ("🏠 Головна", "home"),
+        ("🗺️ Диспетчер мапи", "map"),
         ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"),
         ("📊 Аналітика та KPI", "analytics"),
@@ -222,6 +224,7 @@ TAB_DEFINITIONS = {
         ("👥 Управління доступом", "users"),
     ],
     "brigade_tabs": [
+        ("🏠 Головна", "home"),
         ("📱 Мобільний клієнт", "mobile"),
     ],
 }
@@ -451,6 +454,195 @@ def build_folium_map(objects: list, active_layers: list) -> "folium.Map":
     fmap.get_root().html.add_child(folium.Element(legend_html))
     folium.LayerControl(collapsed=False).add_to(fmap)
     return fmap
+
+
+# ==========================================
+# ВКЛАДКА: ГОЛОВНА СТОРІНКА
+# ==========================================
+if "home" in tab_map:
+    with tab_map["home"]:
+
+        # ── Герой-блок ──────────────────────────────────────────────────
+        st.markdown("""
+        <div style="
+            background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 60%, #0f172a 100%);
+            border-radius: 16px;
+            padding: 3rem 2.5rem 2.5rem 2.5rem;
+            margin-bottom: 2rem;
+            border: 1px solid #1e3a5f;
+            position: relative;
+            overflow: hidden;
+        ">
+            <div style="position:absolute;top:-40px;right:-40px;font-size:220px;
+                        opacity:0.04;line-height:1;">⚡</div>
+            <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.8rem;">
+                <span style="font-size:2.8rem;">⚡</span>
+                <div>
+                    <div style="color:#93c5fd;font-size:0.85rem;letter-spacing:3px;
+                                text-transform:uppercase;font-weight:600;">
+                        АТ «ВІННИЦЯОБЛЕНЕРГО»
+                    </div>
+                    <h1 style="color:#f1f5f9;margin:0;font-size:2.1rem;line-height:1.2;">
+                        ГІС Диспетчерська Система
+                    </h1>
+                    <div style="color:#60a5fa;font-size:1.1rem;margin-top:4px;">
+                        Регіональних Електромереж&nbsp;&nbsp;
+                        <span style="background:#1d4ed8;color:#fff;border-radius:6px;
+                                     padding:2px 10px;font-size:0.8rem;vertical-align:middle;">
+                            v5.0
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <p style="color:#94a3b8;font-size:1rem;max-width:700px;margin:1rem 0 0 0;line-height:1.7;">
+                Єдина цифрова платформа оперативного управління, моніторингу та технічного
+                обслуговування електричних мереж Вінницької області. Об'єднує диспетчерів,
+                інженерів та виїзні бригади в одному захищеному середовищі реального часу.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── Статистика одним рядком ──────────────────────────────────────
+        s1, s2, s3, s4, s5 = st.columns(5)
+        def stat_card(col, icon, value, label, color="#38bdf8"):
+            col.markdown(f"""
+            <div style="background:#1e293b;border-radius:10px;padding:1rem 0.8rem;
+                        text-align:center;border:1px solid #334155;">
+                <div style="font-size:1.6rem;">{icon}</div>
+                <div style="color:{color};font-size:1.5rem;font-weight:700;line-height:1.2;">{value}</div>
+                <div style="color:#64748b;font-size:0.75rem;margin-top:3px;">{label}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        stat_card(s1, "🏭", "8",    "Структурних одиниць")
+        stat_card(s2, "🔌", "26",   "Дільниць обслуговування")
+        stat_card(s3, "⚡", "148.5 МВт", "Потужність мережі", "#a78bfa")
+        stat_card(s4, "🗺️", "6",   "ГІС-об'єктів в БД", "#34d399")
+        stat_card(s5, "🚨", "1",    "Активних аварій", "#f87171")
+
+        st.markdown("<div style='margin-top:2rem'></div>", unsafe_allow_html=True)
+
+        # ── Два стовпці: можливості + технології ────────────────────────
+        col_feat, col_tech = st.columns([1.1, 0.9])
+
+        with col_feat:
+            st.markdown("### 🧩 Функціональні модулі системи")
+
+            modules = [
+                ("🗺️", "Диспетчер ГІС-мапи",
+                 "Інтерактивна Folium-карта з шарами ЛЕП, зонами СО та кольоровими маркерами аварій. "
+                 "Pop-up телеметрія по кліку. Дистанційне керування фідерами через SCADA-інтерфейс."),
+                ("📱", "Мобільний клієнт бригади",
+                 "Цифровий наряд-допуск для виїзних бригад: чек-лист безпеки, звіт про виконану роботу, "
+                 "закриття наряду з автозаписом у журнал подій."),
+                ("📊", "Аналітика та KPI",
+                 "Прогнозування добового навантаження SmartGrid AI, індекси надійності SAIDI/SAIFI, "
+                 "кругова діаграма розподілу подій у реальному часі."),
+                ("📋", "Журнал подій",
+                 "Повний аудит-лог з фільтрацією за типом події, критичністю та об'єктом. "
+                 "Фіксує дії операторів та записи бригад із міткою часу."),
+                ("📅", "Планування ТО",
+                 "Графік регламентного технічного обслуговування з можливістю додавання нових задач "
+                 "прямо з інтерфейсу диспетчера."),
+                ("👥", "Управління доступом",
+                 "Рольова модель (Адмін / Диспетчер / Монтер), реєстрація нових користувачів, "
+                 "матриця прав доступу за вкладками. Тільки для адміністраторів."),
+            ]
+
+            for icon, title, desc in modules:
+                with st.container(border=True):
+                    st.markdown(f"**{icon} {title}**")
+                    st.caption(desc)
+
+        with col_tech:
+            st.markdown("### 🛠️ Технічний стек")
+            st.markdown("""
+            <div style="background:#1e293b;border-radius:12px;padding:1.2rem 1.4rem;
+                        border:1px solid #334155;font-size:0.88rem;line-height:2;">
+                <table style="width:100%;border-collapse:collapse;color:#cbd5e1;">
+                    <tr>
+                        <td style="color:#60a5fa;width:38%;padding:4px 0;">🐍 Мова</td>
+                        <td>Python 3.11+</td>
+                    </tr>
+                    <tr>
+                        <td style="color:#60a5fa;padding:4px 0;">🖥️ Фреймворк</td>
+                        <td>Streamlit ≥ 1.35</td>
+                    </tr>
+                    <tr>
+                        <td style="color:#60a5fa;padding:4px 0;">🗺️ Картографія</td>
+                        <td>Folium + streamlit-folium</td>
+                    </tr>
+                    <tr>
+                        <td style="color:#60a5fa;padding:4px 0;">📊 Аналітика</td>
+                        <td>Pandas + Matplotlib</td>
+                    </tr>
+                    <tr>
+                        <td style="color:#60a5fa;padding:4px 0;">📁 Експорт</td>
+                        <td>openpyxl (XLSX / CSV)</td>
+                    </tr>
+                    <tr>
+                        <td style="color:#60a5fa;padding:4px 0;">🔐 Авторизація</td>
+                        <td>Session-state + рольова модель</td>
+                    </tr>
+                    <tr>
+                        <td style="color:#60a5fa;padding:4px 0;">🎨 Теми карти</td>
+                        <td>CartoDB Dark Matter</td>
+                    </tr>
+                    <tr>
+                        <td style="color:#60a5fa;padding:4px 0;">📦 Версія</td>
+                        <td>v5.0 — травень 2026</td>
+                    </tr>
+                </table>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("<div style='margin-top:1.2rem'></div>", unsafe_allow_html=True)
+            st.markdown("### 🗂️ Охоплення мережі")
+            coverage = {
+                "СО «Вінницькі міські ЕМ»": 1,
+                "СО «Вінницькі центральні ЕМ»": 3,
+                "СО «Жмеринські ЕМ»": 3,
+                "СО «Хмільницькі ЕМ»": 3,
+                "СО «Гайсинські ЕМ»": 5,
+                "СО «Могилів-Подільські ЕМ»": 4,
+                "СО «Тульчинські ЕМ»": 4,
+                "СО «Вінницькі східні ЕМ»": 5,
+            }
+            import matplotlib.pyplot as plt
+            fig_h, ax_h = plt.subplots(figsize=(5, 3.2))
+            fig_h.patch.set_facecolor("#1e293b")
+            ax_h.set_facecolor("#1e293b")
+            bars = ax_h.barh(
+                [k.replace("СО «", "").replace("»", "") for k in coverage.keys()],
+                list(coverage.values()),
+                color="#3b82f6", height=0.55
+            )
+            ax_h.bar_label(bars, fmt="%d дільн.", color="#93c5fd", fontsize=8, padding=3)
+            ax_h.tick_params(colors="#94a3b8", labelsize=8)
+            ax_h.spines[:].set_color("#334155")
+            ax_h.set_xlabel("Кількість дільниць", color="#64748b", fontsize=8)
+            ax_h.set_xlim(0, 7)
+            plt.tight_layout()
+            st.pyplot(fig_h)
+            plt.close(fig_h)
+
+        # ── Нижній банер ─────────────────────────────────────────────────
+        st.markdown("<div style='margin-top:1.5rem'></div>", unsafe_allow_html=True)
+        st.markdown("""
+        <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:10px;
+                    padding:1rem 1.5rem;display:flex;justify-content:space-between;
+                    align-items:center;flex-wrap:wrap;gap:0.5rem;">
+            <span style="color:#475569;font-size:0.8rem;">
+                © 2026 АТ «Вінницяобленерго» — ГІС ДС v5.0
+            </span>
+            <span style="color:#475569;font-size:0.8rem;">
+                🔒 Конфіденційна інформація. Доступ суворо за ролями.
+            </span>
+            <span style="color:#475569;font-size:0.8rem;">
+                ІТ-відділ: it@voe.com.ua
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
 
 
 # ==========================================
