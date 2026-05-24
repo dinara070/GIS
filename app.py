@@ -492,37 +492,338 @@ if "map" in tab_map:
 # ==========================================
 # ВКЛАДКА: МОБІЛЬНИЙ КЛІЄНТ
 # ==========================================
+
+# Ініціалізація стану геолокації та фото
+if "geo_arrived" not in st.session_state:
+    st.session_state.geo_arrived = False
+if "geo_lat" not in st.session_state:
+    st.session_state.geo_lat = None
+if "geo_lon" not in st.session_state:
+    st.session_state.geo_lon = None
+if "voice_transcript" not in st.session_state:
+    st.session_state.voice_transcript = ""
+if "uploaded_photos" not in st.session_state:
+    st.session_state.uploaded_photos = []
+
+# Координати ТП-Шаргород-100 (еталон для звірки)
+TP_TARGET = {"name": "ТП-Шаргород-100", "lat": 48.7364, "lon": 28.0822}
+
+def haversine_km(lat1, lon1, lat2, lon2):
+    """Відстань між двома точками у км (формула Гаверсинусів)."""
+    import math
+    R = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
 if "mobile" in tab_map:
     with tab_map["mobile"]:
         st.title("📱 Цифровий кабінет лінійної бригади")
-        _, phone_col, _ = st.columns([1, 2, 1])
-        with phone_col:
-            st.markdown("---")
-            st.markdown("<h3 style='text-align:center;color:#185FA5;'>📱 Мобільна бригада АТ «Вінницяобленерго»</h3>", unsafe_allow_html=True)
-            st.info(f"👷 {current_user['display_name']} | GPS: Активний")
-            if st.session_state.task_closed:
-                st.success("🎉 Наряд успішно закрито та підписано ЕЦП!")
-                if st.button("🔄 Оновити стрічку завдань"):
+
+        # ── Верхня панель статусу ────────────────────────────────────────
+        hdr1, hdr2, hdr3 = st.columns(3)
+        hdr1.markdown(f"""
+        <div style="background:#1e293b;border-radius:8px;padding:0.7rem 1rem;border:1px solid #334155;">
+            <div style="color:#64748b;font-size:0.75rem;">👷 Оператор</div>
+            <div style="color:#f1f5f9;font-weight:600;font-size:0.9rem;">{current_user['display_name']}</div>
+            <div style="color:#94a3b8;font-size:0.75rem;">{current_user['subdivision']}</div>
+        </div>""", unsafe_allow_html=True)
+        geo_status_color = "#22c55e" if st.session_state.geo_arrived else "#f59e0b"
+        geo_status_label = "📍 Прибуття зафіксовано" if st.session_state.geo_arrived else "⏳ Очікування прибуття"
+        hdr2.markdown(f"""
+        <div style="background:#1e293b;border-radius:8px;padding:0.7rem 1rem;border:1px solid #334155;">
+            <div style="color:#64748b;font-size:0.75rem;">🛰️ GPS-статус</div>
+            <div style="color:{geo_status_color};font-weight:600;font-size:0.9rem;">{geo_status_label}</div>
+            <div style="color:#94a3b8;font-size:0.75rem;">{"%.4f° N, %.4f° E" % (st.session_state.geo_lat, st.session_state.geo_lon) if st.session_state.geo_lat else "Координати не визначено"}</div>
+        </div>""", unsafe_allow_html=True)
+        photo_count = len(st.session_state.uploaded_photos)
+        hdr3.markdown(f"""
+        <div style="background:#1e293b;border-radius:8px;padding:0.7rem 1rem;border:1px solid #334155;">
+            <div style="color:#64748b;font-size:0.75rem;">📸 Фотозвіт</div>
+            <div style="color:#60a5fa;font-weight:600;font-size:0.9rem;">{photo_count} фото прикріплено</div>
+            <div style="color:#94a3b8;font-size:0.75rem;">{"✅ Готово до відправки" if photo_count > 0 else "Фото не додано"}</div>
+        </div>""", unsafe_allow_html=True)
+
+        st.markdown("<div style='margin-top:1rem'></div>", unsafe_allow_html=True)
+
+        # ── Поточний наряд ───────────────────────────────────────────────
+        st.markdown("""
+        <div style="background:#1e3a5f;border-radius:10px;padding:0.9rem 1.2rem;
+                    border:1px solid #1e4f8a;margin-bottom:1rem;">
+            <div style="color:#93c5fd;font-size:0.78rem;font-weight:600;letter-spacing:2px;text-transform:uppercase;">
+                📋 Активний наряд-допуск
+            </div>
+            <div style="color:#f1f5f9;font-weight:700;font-size:1.05rem;margin-top:4px;">
+                ТП-Шаргород-100 — Планова діагностика шин
+            </div>
+            <div style="display:flex;gap:1.5rem;margin-top:6px;flex-wrap:wrap;">
+                <span style="color:#94a3b8;font-size:0.82rem;">🏢 СО «Жмеринські ЕМ» / Шаргородська дільниця</span>
+                <span style="color:#94a3b8;font-size:0.82rem;">📍 48.7364° N, 28.0822° E</span>
+                <span style="color:#fbbf24;font-size:0.82rem;">⚡ Критичність: Висока</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if st.session_state.task_closed:
+            st.success("🎉 Наряд успішно закрито, підписано ЕЦП та відправлено до диспетчерського центру!")
+            col_reopen, _ = st.columns([1, 2])
+            with col_reopen:
+                if st.button("🔄 Нове завдання"):
                     st.session_state.task_closed = False
+                    st.session_state.geo_arrived = False
+                    st.session_state.geo_lat = None
+                    st.session_state.geo_lon = None
+                    st.session_state.voice_transcript = ""
+                    st.session_state.uploaded_photos = []
                     st.rerun()
-            else:
-                st.warning("📋 **Поточна задача СО «Жмеринські ЕМ» (Шаргородська дільниця):**")
-                st.markdown("**Об'єкт:** ТП-Шаргород-100  \n**Завдання:** Планова діагностика шин та огляд вимикачів лінії.")
-                tb_1 = st.checkbox("Заземлення встановлено")
-                tb_2 = st.checkbox("Плакати з техніки безпеки розвішано")
-                comment = st.text_area("Звіт про виконану роботу:")
-                if st.button("🚀 Закрити наряд-допуск", use_container_width=True):
-                    if tb_1 and tb_2 and comment:
-                        st.session_state.task_closed = True
-                        st.session_state.log_data.insert(0, {
-                            "Час": datetime.datetime.now().strftime("%d.%m %H:%M"), "Тип": "Планове ТО",
-                            "Об'єкт": "ТП-Шаргород-100",
-                            "Опис": f"[{current_user['display_name']}]: {comment}", "Критичність": "Висока"
-                        })
-                        st.rerun()
+        else:
+            # ── 4 блоки розташовані у 2 колонки ─────────────────────────
+            col_left, col_right = st.columns([1, 1], gap="medium")
+
+            with col_left:
+                # ── БЛОК 1: Геолокація ───────────────────────────────────
+                with st.container(border=True):
+                    st.markdown("### 🛰️ Геолокація — «Я на місці»")
+                    st.caption("Натисніть кнопку після прибуття до об'єкта. Система звірить ваші координати з розташуванням ТП.")
+
+                    if st.session_state.geo_arrived:
+                        dist = haversine_km(
+                            st.session_state.geo_lat, st.session_state.geo_lon,
+                            TP_TARGET["lat"], TP_TARGET["lon"]
+                        )
+                        if dist < 0.5:
+                            st.success(f"✅ Прибуття підтверджено! Відстань до {TP_TARGET['name']}: **{dist*1000:.0f} м**")
+                        else:
+                            st.warning(f"⚠️ Ви зафіксовані, але далеко від об'єкта: **{dist:.2f} км**")
+                        st.markdown(f"""
+                        <div style="background:#0f172a;border-radius:8px;padding:0.6rem 0.9rem;
+                                    font-size:0.82rem;color:#94a3b8;margin-top:0.5rem;">
+                            🕐 Час прибуття: <b style="color:#f1f5f9">{st.session_state.geo_time}</b><br>
+                            📍 Координати: <b style="color:#60a5fa">{st.session_state.geo_lat:.4f}° N, {st.session_state.geo_lon:.4f}° E</b>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        if st.button("🔄 Оновити геопозицію", use_container_width=True):
+                            st.session_state.geo_arrived = False
+                            st.rerun()
                     else:
-                        st.error("Заповніть чек-лист безпеки та коментар!")
-            st.markdown("---")
+                        st.markdown("""
+                        <div style="background:#0f172a;border-radius:8px;padding:0.7rem;
+                                    font-size:0.82rem;color:#64748b;text-align:center;margin-bottom:0.5rem;">
+                            ℹ️ Для демо-режиму координати симулюються поблизу ТП-Шаргород-100
+                        </div>""", unsafe_allow_html=True)
+
+                        geo_mode = st.radio("Режим визначення координат:", 
+                                            ["📡 Симуляція (поблизу ТП)", "📝 Ввести вручну"],
+                                            horizontal=True, label_visibility="collapsed")
+
+                        if geo_mode == "📝 Ввести вручну":
+                            g1, g2 = st.columns(2)
+                            manual_lat = g1.number_input("Широта (N)", value=48.7364, format="%.4f")
+                            manual_lon = g2.number_input("Довгота (E)", value=28.0822, format="%.4f")
+                        else:
+                            # Симуляція: точка поряд з ТП ±0.001°
+                            manual_lat = TP_TARGET["lat"] + _rnd.uniform(-0.002, 0.002)
+                            manual_lon = TP_TARGET["lon"] + _rnd.uniform(-0.002, 0.002)
+
+                        if st.button("📍 Я на місці — зафіксувати прибуття", use_container_width=True, type="primary"):
+                            now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
+                            st.session_state.geo_lat   = round(manual_lat, 4)
+                            st.session_state.geo_lon   = round(manual_lon, 4)
+                            st.session_state.geo_time  = now_str
+                            st.session_state.geo_arrived = True
+                            dist = haversine_km(manual_lat, manual_lon, TP_TARGET["lat"], TP_TARGET["lon"])
+                            st.session_state.log_data.insert(0, {
+                                "Час": now_str,
+                                "Тип": "Інспекція",
+                                "Об'єкт": TP_TARGET["name"],
+                                "Опис": (
+                                    f"[{current_user['display_name']}] 📍 ПРИБУТТЯ зафіксовано. "
+                                    f"Координати: {manual_lat:.4f}° N, {manual_lon:.4f}° E. "
+                                    f"Відстань до об'єкта: {dist*1000:.0f} м."
+                                ),
+                                "Критичність": "Висока"
+                            })
+                            st.rerun()
+
+                # ── БЛОК 2: Чек-лист безпеки ────────────────────────────
+                with st.container(border=True):
+                    st.markdown("### ✅ Чек-лист безпеки (ПУЕ)")
+                    tb_1 = st.checkbox("⚡ Заземлення встановлено на всіх фазах")
+                    tb_2 = st.checkbox("🪧 Плакати з техніки безпеки розвішано")
+                    tb_3 = st.checkbox("🔒 Комутаційні апарати заблоковано")
+                    tb_4 = st.checkbox("👷 Склад бригади проінструктовано")
+
+                    safety_ok = tb_1 and tb_2 and tb_3 and tb_4
+                    if safety_ok:
+                        st.success("✅ Чек-лист повністю виконано")
+                    else:
+                        remaining = sum(1 for x in [tb_1, tb_2, tb_3, tb_4] if not x)
+                        st.warning(f"⚠️ Залишилось пунктів: {remaining}")
+
+            with col_right:
+                # ── БЛОК 3: Фотозвіт ────────────────────────────────────
+                with st.container(border=True):
+                    st.markdown("### 📸 Фотозвіт (до та після робіт)")
+                    st.caption("Прикріпіть фото пошкодженого обладнання або виконаної роботи. На мобільному — доступна камера.")
+
+                    uploaded_files = st.file_uploader(
+                        "Оберіть або зробіть фото:",
+                        type=["jpg", "jpeg", "png", "webp", "heic"],
+                        accept_multiple_files=True,
+                        key="photo_uploader",
+                        help="На мобільних пристроях відкриється камера або галерея"
+                    )
+
+                    if uploaded_files:
+                        st.session_state.uploaded_photos = uploaded_files
+                        st.success(f"✅ Прикріплено {len(uploaded_files)} фото")
+                        if len(uploaded_files) <= 4:
+                            photo_cols = st.columns(min(len(uploaded_files), 2))
+                            for i, f in enumerate(uploaded_files):
+                                with photo_cols[i % 2]:
+                                    st.image(f, caption=f"📷 {f.name}", use_container_width=True)
+                        else:
+                            st.markdown(f"📂 Додано {len(uploaded_files)} файлів — перегляд у закритому вигляді.")
+                            with st.expander("🖼️ Переглянути всі фото"):
+                                gc = st.columns(2)
+                                for i, f in enumerate(uploaded_files):
+                                    with gc[i % 2]:
+                                        st.image(f, caption=f.name, use_container_width=True)
+                    else:
+                        st.markdown("""
+                        <div style="border:2px dashed #334155;border-radius:10px;padding:1.5rem;
+                                    text-align:center;color:#475569;margin-top:0.3rem;">
+                            <div style="font-size:2rem;">📷</div>
+                            <div style="font-size:0.85rem;margin-top:0.4rem;">
+                                Перетягніть фото або натисніть "Browse files"<br>
+                                <span style="color:#60a5fa;">На смартфоні — відкриється камера</span>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                # ── БЛОК 4: Голосовий / текстовий звіт ──────────────────
+                with st.container(border=True):
+                    st.markdown("### 🎙️ Звіт про виконану роботу")
+
+                    report_mode = st.radio(
+                        "Спосіб введення:", 
+                        ["⌨️ Текстовий", "🎙️ Голосова замітка (транскрипція)"],
+                        horizontal=True, label_visibility="collapsed"
+                    )
+
+                    if report_mode == "🎙️ Голосова замітка (транскрипція)":
+                        st.markdown("""
+                        <div style="background:#1e293b;border-radius:8px;padding:0.8rem 1rem;
+                                    border-left:3px solid #60a5fa;margin-bottom:0.5rem;">
+                            <div style="color:#60a5fa;font-weight:600;font-size:0.85rem;">🤖 AI Транскрипція (симуляція)</div>
+                            <div style="color:#94a3b8;font-size:0.78rem;margin-top:3px;">
+                                На реальному пристрої тут підключається Whisper API або Web Speech API.
+                                Для демо — введіть текст у поле нижче, натисніть «Транскрибувати».
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                        voice_input = st.text_input(
+                            "🎤 Диктуйте (або введіть текст для симуляції):",
+                            placeholder="Наприклад: Ізолятор замінено, кріплення перевірено, напруга в нормі...",
+                            key="voice_raw_input"
+                        )
+                        v1, v2 = st.columns([1, 1])
+                        with v1:
+                            if st.button("🎙️ Транскрибувати", use_container_width=True):
+                                if voice_input.strip():
+                                    timestamp = datetime.datetime.now().strftime("%H:%M")
+                                    st.session_state.voice_transcript = (
+                                        f"[🎙️ Голосова замітка {timestamp}]: {voice_input.strip()}"
+                                    )
+                                    st.toast("✅ Транскрипцію завершено!")
+                                else:
+                                    st.warning("Спочатку введіть або продиктуйте текст.")
+                        with v2:
+                            quick_templates = st.selectbox(
+                                "📝 Швидкий шаблон:",
+                                ["— оберіть —", "Роботи виконано в повному обсязі", 
+                                 "Замінено ізолятор, пошкоджень не виявлено",
+                                 "Виявлено корозію кріплення, потребує заміни",
+                                 "Вимикач перевірено, контакти в нормі"],
+                                label_visibility="collapsed"
+                            )
+                            if quick_templates != "— оберіть —":
+                                st.session_state.voice_transcript = quick_templates
+
+                        if st.session_state.voice_transcript:
+                            st.markdown(f"""
+                            <div style="background:#0f172a;border-radius:8px;padding:0.7rem 0.9rem;
+                                        border:1px solid #334155;font-size:0.85rem;color:#e2e8f0;
+                                        margin-top:0.3rem;">
+                                <span style="color:#a78bfa;">📝 Транскрипт:</span><br>{st.session_state.voice_transcript}
+                            </div>
+                            """, unsafe_allow_html=True)
+                        comment = st.session_state.voice_transcript
+
+                    else:
+                        comment = st.text_area(
+                            "Текстовий звіт:",
+                            placeholder="Опишіть виконані роботи, виявлені дефекти, стан обладнання...",
+                            height=120,
+                            key="text_comment"
+                        )
+
+            # ── Кнопка закриття наряду (повна ширина) ───────────────────
+            st.markdown("<div style='margin-top:0.5rem'></div>", unsafe_allow_html=True)
+
+            all_checks = tb_1 and tb_2 and tb_3 and tb_4
+            has_comment = bool(comment and comment.strip())
+            has_geo = st.session_state.geo_arrived
+
+            # Прогрес-індикатор готовності
+            readiness = sum([all_checks, has_comment, has_geo, photo_count > 0])
+            readiness_pct = int(readiness / 4 * 100)
+            readiness_colors = {0: "#ef4444", 1: "#f59e0b", 2: "#fbbf24", 3: "#a3e635", 4: "#22c55e"}
+            readiness_color = readiness_colors.get(readiness, "#64748b")
+
+            st.markdown(f"""
+            <div style="background:#1e293b;border-radius:10px;padding:0.8rem 1.2rem;
+                        border:1px solid #334155;margin-bottom:0.8rem;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                    <span style="color:#94a3b8;font-size:0.82rem;font-weight:600;">📊 Готовність наряду до закриття</span>
+                    <span style="color:{readiness_color};font-weight:700;">{readiness_pct}%</span>
+                </div>
+                <div style="background:#0f172a;border-radius:6px;height:8px;overflow:hidden;">
+                    <div style="background:{readiness_color};width:{readiness_pct}%;height:100%;
+                                border-radius:6px;transition:width 0.3s;"></div>
+                </div>
+                <div style="display:flex;gap:1rem;margin-top:8px;font-size:0.75rem;flex-wrap:wrap;">
+                    <span style="color:{'#22c55e' if all_checks else '#475569'};">{'✅' if all_checks else '⬜'} Чек-лист безпеки</span>
+                    <span style="color:{'#22c55e' if has_geo else '#475569'};">{'✅' if has_geo else '⬜'} GPS-прибуття</span>
+                    <span style="color:{'#22c55e' if has_comment else '#475569'};">{'✅' if has_comment else '⬜'} Звіт</span>
+                    <span style="color:{'#22c55e' if photo_count > 0 else '#475569'};">{'✅' if photo_count > 0 else '⬜'} Фото ({photo_count})</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            btn_label = "🚀 Закрити наряд-допуск та відправити звіт" if readiness == 4 else f"🚀 Закрити наряд ({readiness_pct}% готовності)"
+            if st.button(btn_label, use_container_width=True, type="primary"):
+                if not all_checks:
+                    st.error("❌ Заповніть усі пункти чек-листа безпеки (ПУЕ)!")
+                elif not has_comment:
+                    st.error("❌ Введіть або продиктуйте звіт про виконану роботу!")
+                else:
+                    now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
+                    geo_info = f" | GPS: {st.session_state.geo_lat:.4f}° N, {st.session_state.geo_lon:.4f}° E" if has_geo else " | GPS: не зафіксовано"
+                    photo_info = f" | Фото: {photo_count} шт." if photo_count > 0 else ""
+                    st.session_state.log_data.insert(0, {
+                        "Час": now_str,
+                        "Тип": "Планове ТО",
+                        "Об'єкт": "ТП-Шаргород-100",
+                        "Опис": f"[{current_user['display_name']}]{geo_info}{photo_info}: {comment.strip()}",
+                        "Критичність": "Висока"
+                    })
+                    st.session_state.task_closed = True
+                    st.rerun()
+
+        st.markdown("---")
 
 # ==========================================
 # ВКЛАДКА: СТРУКТУРА КОМПАНІЇ
