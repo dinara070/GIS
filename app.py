@@ -503,7 +503,11 @@ if "geo_lon" not in st.session_state:
 if "voice_transcript" not in st.session_state:
     st.session_state.voice_transcript = ""
 if "uploaded_photos" not in st.session_state:
-    st.session_state.uploaded_photos = []
+    st.session_state.uploaded_photos = []   # список dict {name, data, source}
+if "camera_shots" not in st.session_state:
+    st.session_state.camera_shots = []      # знімки зі st.camera_input
+if "photo_input_mode" not in st.session_state:
+    st.session_state.photo_input_mode = "auto"   # "auto" | "camera" | "upload"
 
 # Координати ТП-Шаргород-100 (еталон для звірки)
 TP_TARGET = {"name": "ТП-Шаргород-100", "lat": 48.7364, "lon": 28.0822}
@@ -537,12 +541,12 @@ if "mobile" in tab_map:
             <div style="color:{geo_status_color};font-weight:600;font-size:0.9rem;">{geo_status_label}</div>
             <div style="color:#94a3b8;font-size:0.75rem;">{"%.4f° N, %.4f° E" % (st.session_state.geo_lat, st.session_state.geo_lon) if st.session_state.geo_lat else "Координати не визначено"}</div>
         </div>""", unsafe_allow_html=True)
-        photo_count = len(st.session_state.uploaded_photos)
+        _hdr_photo_count = len(st.session_state.camera_shots) + len(st.session_state.uploaded_photos)
         hdr3.markdown(f"""
         <div style="background:#1e293b;border-radius:8px;padding:0.7rem 1rem;border:1px solid #334155;">
             <div style="color:#64748b;font-size:0.75rem;">📸 Фотозвіт</div>
-            <div style="color:#60a5fa;font-weight:600;font-size:0.9rem;">{photo_count} фото прикріплено</div>
-            <div style="color:#94a3b8;font-size:0.75rem;">{"✅ Готово до відправки" if photo_count > 0 else "Фото не додано"}</div>
+            <div style="color:#60a5fa;font-weight:600;font-size:0.9rem;">{_hdr_photo_count} фото прикріплено</div>
+            <div style="color:#94a3b8;font-size:0.75rem;">{"✅ Готово до відправки" if _hdr_photo_count > 0 else "Фото не додано"}</div>
         </div>""", unsafe_allow_html=True)
 
         st.markdown("<div style='margin-top:1rem'></div>", unsafe_allow_html=True)
@@ -576,6 +580,7 @@ if "mobile" in tab_map:
                     st.session_state.geo_lon = None
                     st.session_state.voice_transcript = ""
                     st.session_state.uploaded_photos = []
+                    st.session_state.camera_shots = []
                     st.rerun()
         else:
             # ── 4 блоки розташовані у 2 колонки ─────────────────────────
@@ -662,45 +667,163 @@ if "mobile" in tab_map:
                         st.warning(f"⚠️ Залишилось пунктів: {remaining}")
 
             with col_right:
-                # ── БЛОК 3: Фотозвіт ────────────────────────────────────
+                # ── БЛОК 3: Фотозвіт (розумний вибір камера / файл) ─────
                 with st.container(border=True):
                     st.markdown("### 📸 Фотозвіт (до та після робіт)")
-                    st.caption("Прикріпіть фото пошкодженого обладнання або виконаної роботи. На мобільному — доступна камера.")
 
-                    uploaded_files = st.file_uploader(
-                        "Оберіть або зробіть фото:",
-                        type=["jpg", "jpeg", "png", "webp", "heic"],
-                        accept_multiple_files=True,
-                        key="photo_uploader",
-                        help="На мобільних пристроях відкриється камера або галерея"
+                    # --- Детектор user-agent для автовизначення мобільного ---
+                    # Читаємо заголовок через st.context (Streamlit ≥ 1.37)
+                    # або через query_params як fallback
+                    try:
+                        ua = st.context.headers.get("user-agent", "").lower()
+                    except Exception:
+                        ua = ""
+                    is_mobile = any(kw in ua for kw in [
+                        "android", "iphone", "ipad", "mobile", "ipod"
+                    ])
+
+                    # --- Перемикач режиму ---
+                    mode_labels = {
+                        "auto":   f"🤖 Авто ({'📱 Камера' if is_mobile else '🖥️ Файл'})",
+                        "camera": "📷 Камера (camera_input)",
+                        "upload": "🗂️ Файл / Галерея (file_uploader)",
+                    }
+                    chosen_mode = st.radio(
+                        "Режим введення фото:",
+                        options=list(mode_labels.keys()),
+                        format_func=lambda k: mode_labels[k],
+                        horizontal=True,
+                        key="photo_mode_radio",
+                        label_visibility="collapsed",
+                    )
+                    st.session_state.photo_input_mode = chosen_mode
+
+                    # Ефективний режим після авто-детекції
+                    effective = (
+                        ("camera" if is_mobile else "upload")
+                        if chosen_mode == "auto"
+                        else chosen_mode
                     )
 
-                    if uploaded_files:
-                        st.session_state.uploaded_photos = uploaded_files
-                        st.success(f"✅ Прикріплено {len(uploaded_files)} фото")
-                        if len(uploaded_files) <= 4:
-                            photo_cols = st.columns(min(len(uploaded_files), 2))
-                            for i, f in enumerate(uploaded_files):
-                                with photo_cols[i % 2]:
-                                    st.image(f, caption=f"📷 {f.name}", use_container_width=True)
+                    # Підказка чому обрано цей режим
+                    if chosen_mode == "auto":
+                        if is_mobile:
+                            st.caption("📱 Виявлено мобільний пристрій — увімкнено пряму камеру.")
                         else:
-                            st.markdown(f"📂 Додано {len(uploaded_files)} файлів — перегляд у закритому вигляді.")
-                            with st.expander("🖼️ Переглянути всі фото"):
-                                gc = st.columns(2)
-                                for i, f in enumerate(uploaded_files):
-                                    with gc[i % 2]:
-                                        st.image(f, caption=f.name, use_container_width=True)
+                            st.caption("🖥️ Десктоп — активовано завантаження файлів. Переключіться на «Камера» для веб-камери.")
+
+                    # ═══════════════════════════════════════════════════════
+                    # РЕЖИМ A: st.camera_input  (пряма камера)
+                    # ═══════════════════════════════════════════════════════
+                    if effective == "camera":
+                        st.markdown("""
+                        <div style="background:#0f172a;border-radius:8px;padding:6px 12px;
+                                    font-size:0.78rem;color:#64748b;margin-bottom:6px;">
+                            📷 <b style="color:#60a5fa;">st.camera_input</b> — натисніть кнопку щоб зробити знімок.
+                            Кожен знімок додається до фотозвіту.
+                        </div>""", unsafe_allow_html=True)
+
+                        new_shot = st.camera_input(
+                            "Зробіть знімок об'єкта:",
+                            key="cam_shot",
+                            help="Натисніть 'Take Photo' — знімок одразу додасться до наряду"
+                        )
+
+                        if new_shot is not None:
+                            # Перевіряємо чи цей знімок вже доданий (по байтах)
+                            new_bytes = new_shot.getvalue()
+                            already = any(
+                                s.get("bytes") == new_bytes
+                                for s in st.session_state.camera_shots
+                            )
+                            if not already:
+                                ts = datetime.datetime.now().strftime("%H:%M:%S")
+                                st.session_state.camera_shots.append({
+                                    "name": f"Знімок_{ts}.jpg",
+                                    "bytes": new_bytes,
+                                    "source": "camera",
+                                    "ts": ts,
+                                })
+                                st.toast(f"📸 Знімок {len(st.session_state.camera_shots)} додано до наряду!")
+
+                        # Галерея накопичених знімків
+                        if st.session_state.camera_shots:
+                            n = len(st.session_state.camera_shots)
+                            st.success(f"✅ У фотозвіті: **{n} знімків**")
+                            with st.expander(f"🖼️ Галерея знімків ({n} шт.)", expanded=(n <= 3)):
+                                gcols = st.columns(2)
+                                for i, shot in enumerate(st.session_state.camera_shots):
+                                    with gcols[i % 2]:
+                                        st.image(shot["bytes"], caption=f"📷 {shot['name']}", use_container_width=True)
+                                        # Кнопка видалення окремого знімка
+                                        if st.button(f"🗑️ Видалити", key=f"del_shot_{i}"):
+                                            st.session_state.camera_shots.pop(i)
+                                            st.rerun()
+                            if st.button("🗑️ Очистити всі знімки", use_container_width=True):
+                                st.session_state.camera_shots = []
+                                st.rerun()
+                        else:
+                            st.markdown("""
+                            <div style="border:2px dashed #334155;border-radius:10px;
+                                        padding:1.2rem;text-align:center;color:#475569;margin-top:0.3rem;">
+                                <div style="font-size:2rem;">📷</div>
+                                <div style="font-size:0.82rem;margin-top:0.4rem;">
+                                    Натисніть <b>«Take Photo»</b> вище — кожен знімок<br>
+                                    автоматично додається до звіту наряду.
+                                </div>
+                            </div>""", unsafe_allow_html=True)
+
+                    # ═══════════════════════════════════════════════════════
+                    # РЕЖИМ B: st.file_uploader  (файли / галерея)
+                    # ═══════════════════════════════════════════════════════
                     else:
                         st.markdown("""
-                        <div style="border:2px dashed #334155;border-radius:10px;padding:1.5rem;
-                                    text-align:center;color:#475569;margin-top:0.3rem;">
-                            <div style="font-size:2rem;">📷</div>
-                            <div style="font-size:0.85rem;margin-top:0.4rem;">
-                                Перетягніть фото або натисніть "Browse files"<br>
-                                <span style="color:#60a5fa;">На смартфоні — відкриється камера</span>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        <div style="background:#0f172a;border-radius:8px;padding:6px 12px;
+                                    font-size:0.78rem;color:#64748b;margin-bottom:6px;">
+                            🗂️ <b style="color:#60a5fa;">st.file_uploader</b> — оберіть файли з галереї або файлової системи.
+                            На мобільному браузері також пропонується камера.
+                        </div>""", unsafe_allow_html=True)
+
+                        uploaded_files = st.file_uploader(
+                            "Оберіть фото (можна кілька):",
+                            type=["jpg", "jpeg", "png", "webp", "heic"],
+                            accept_multiple_files=True,
+                            key="photo_uploader",
+                            help="Оберіть 1 або кілька фото з пристрою"
+                        )
+
+                        if uploaded_files:
+                            st.session_state.uploaded_photos = [
+                                {"name": f.name, "bytes": f.getvalue(), "source": "upload"}
+                                for f in uploaded_files
+                            ]
+                            n = len(uploaded_files)
+                            st.success(f"✅ Прикріплено {n} фото з файлової системи")
+                            if n <= 4:
+                                pcols = st.columns(min(n, 2))
+                                for i, f in enumerate(uploaded_files):
+                                    with pcols[i % 2]:
+                                        st.image(f, caption=f"📷 {f.name}", use_container_width=True)
+                            else:
+                                with st.expander(f"🖼️ Переглянути всі {n} фото"):
+                                    gc2 = st.columns(2)
+                                    for i, f in enumerate(uploaded_files):
+                                        with gc2[i % 2]:
+                                            st.image(f, caption=f.name, use_container_width=True)
+                        else:
+                            st.markdown("""
+                            <div style="border:2px dashed #334155;border-radius:10px;
+                                        padding:1.5rem;text-align:center;color:#475569;margin-top:0.3rem;">
+                                <div style="font-size:2rem;">📁</div>
+                                <div style="font-size:0.85rem;margin-top:0.4rem;">
+                                    Перетягніть фото або натисніть <b>«Browse files»</b><br>
+                                    <span style="color:#60a5fa;">Підтримуються JPG, PNG, WEBP, HEIC</span>
+                                </div>
+                            </div>""", unsafe_allow_html=True)
+
+                    # --- Підсумковий лічильник фото (обидва режими) ---
+                    total_photos = len(st.session_state.camera_shots) + len(st.session_state.uploaded_photos)
+                    photo_count = total_photos  # передаємо далі для прогрес-бару
 
                 # ── БЛОК 4: Голосовий / текстовий звіт ──────────────────
                 with st.container(border=True):
