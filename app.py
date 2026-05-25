@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 import json
 import io
 import datetime
@@ -14,7 +15,7 @@ except ImportError:
     FOLIUM_AVAILABLE = False
 
 st.set_page_config(
-    page_title="ГІС Диспетчерська Система Регіональних Електромереж v5.0",
+    page_title="ГІС Диспетчерська Система Регіональних Електромереж v6.0",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -49,12 +50,19 @@ USERS_DB = {
         "display_name": "Бригадир Мельник Т.С.",
         "subdivision": "Бригада №2 (Шаргородська дільниця)"
     },
+    "crm_manager": {
+        "password": "crm2026",
+        "role": "crm",
+        "display_name": "Менеджер CRM Волошина Н.Б.",
+        "subdivision": "Відділ комерційного обліку"
+    },
 }
 
 ROLE_LABELS = {
     "dispatcher": "👷 Диспетчер",
     "admin": "🔑 Адміністратор",
-    "brigade": "🪖 Монтер / Мобільна бригада"
+    "brigade": "🪖 Монтер / Мобільна бригада",
+    "crm": "💰 Менеджер CRM",
 }
 
 if "authenticated" not in st.session_state:
@@ -89,7 +97,7 @@ if not st.session_state.authenticated:
             <div style='font-size: 3rem;'>⚡</div>
             <h2 style='color: #185FA5; margin-bottom: 0;'>АТ «Вінницяобленерго»</h2>
             <p style='color: #555; font-size: 0.9rem; margin-top: 0.3rem;'>
-                ГІС Диспетчерська Система v5.0 — Вхід до системи
+                ГІС Диспетчерська Система v6.0 — Вхід до системи
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -118,6 +126,7 @@ if not st.session_state.authenticated:
             | `admin` | `admin2026` | 🔑 Адміністратор |
             | `brigade1` | `brigade1` | 🪖 Монтер (Бригада №1) |
             | `brigade2` | `brigade2` | 🪖 Монтер (Бригада №2) |
+            | `crm_manager` | `crm2026` | 💰 Менеджер CRM |
             """)
     st.stop()
 
@@ -181,6 +190,80 @@ if "task_closed" not in st.session_state:
     st.session_state.task_closed = False
 
 # ==========================================
+# CRM — ІНІЦІАЛІЗАЦІЯ ДАНИХ
+# ==========================================
+
+# Райони / дільниці та їх координати (центроїди для теплової карти)
+CRM_DISTRICTS = [
+    {"id": "vinnytsia_city",  "name": "Вінниця міська",     "so": "СО «Вінницькі міські ЕМ»",       "lat": 49.233, "lon": 28.468,
+     "consumers_total": 124500, "consumers_paid": 108200, "debt_uah": 4_820_000, "consumption_kwh": 18_450_000},
+    {"id": "vinnytsia_cent",  "name": "Вінницька центр.",    "so": "СО «Вінницькі центральні ЕМ»",   "lat": 49.320, "lon": 28.560,
+     "consumers_total": 38400,  "consumers_paid": 33100,  "debt_uah": 2_150_000, "consumption_kwh": 6_200_000},
+    {"id": "vinnytsia_east",  "name": "Вінницька східна",    "so": "СО «Вінницькі східні ЕМ»",       "lat": 49.105, "lon": 29.100,
+     "consumers_total": 41200,  "consumers_paid": 34800,  "debt_uah": 3_670_000, "consumption_kwh": 7_100_000},
+    {"id": "haisyn",          "name": "Гайсинська",          "so": "СО «Гайсинські ЕМ»",             "lat": 48.810, "lon": 29.380,
+     "consumers_total": 29800,  "consumers_paid": 21400,  "debt_uah": 5_940_000, "consumption_kwh": 5_050_000},
+    {"id": "zhmerynka",       "name": "Жмеринська + Шаргород", "so": "СО «Жмеринські ЕМ»",          "lat": 48.900, "lon": 28.100,
+     "consumers_total": 33600,  "consumers_paid": 30100,  "debt_uah": 1_820_000, "consumption_kwh": 5_700_000},
+    {"id": "khmilnyk",        "name": "Хмільницька",         "so": "СО «Хмільницькі ЕМ»",           "lat": 49.560, "lon": 27.950,
+     "consumers_total": 27100,  "consumers_paid": 23400,  "debt_uah": 2_310_000, "consumption_kwh": 4_600_000},
+    {"id": "mohyliv",         "name": "Могилів-Подільська",  "so": "СО «Могилів-Подільські ЕМ»",    "lat": 48.450, "lon": 27.800,
+     "consumers_total": 24900,  "consumers_paid": 19800,  "debt_uah": 4_480_000, "consumption_kwh": 4_200_000},
+    {"id": "tulchyn",         "name": "Тульчинська",         "so": "СО «Тульчинські ЕМ»",           "lat": 48.670, "lon": 28.840,
+     "consumers_total": 22300,  "consumers_paid": 19700,  "debt_uah": 1_960_000, "consumption_kwh": 3_800_000},
+]
+
+# Тарифи (грн/кВт·год) — двозонний та тризонний лічильник (2026)
+TARIFF_SINGLE  = 4.32   # одноставковий
+TARIFF_DAY     = 4.32   # двозонний день    (07:00–23:00)
+TARIFF_NIGHT   = 2.16   # двозонний ніч     (23:00–07:00)
+TARIFF_PEAK    = 7.01   # тризонний пік     (08:00–11:00, 20:00–22:00)
+TARIFF_SEMI    = 4.32   # тризонний напівпік
+TARIFF_VALLEY  = 2.16   # тризонний ніч/провал
+
+# Місячна динаміка платежів (% сплачено до кінця кожного місяця)
+MONTHS_SHORT = ["Січ", "Лют", "Бер", "Кві", "Тра", "Чер",
+                "Лип", "Сер", "Вер", "Жов", "Лис", "Гру"]
+_rnd.seed(99)
+
+def _gen_monthly_pay_pct(base):
+    return [min(99.5, max(55.0, base + _rnd.uniform(-8, 8))) for _ in range(12)]
+
+if "crm_monthly_pay" not in st.session_state:
+    st.session_state.crm_monthly_pay = {d["id"]: _gen_monthly_pay_pct(
+        d["consumers_paid"] / d["consumers_total"] * 100
+    ) for d in CRM_DISTRICTS}
+
+# Категорії боржників
+DEBTOR_CATEGORIES = ["Населення", "Бюджетні орг.", "Підприємства", "ОСББ / ЖКГ", "Агросектор"]
+if "crm_debtors" not in st.session_state:
+    _rnd.seed(42)
+    st.session_state.crm_debtors = []
+    _names = [
+        ("ТОВ «Агро-Вінниця»","Агросектор"),("ФОП Ткаченко В.М.","Населення"),
+        ("КП «Теплосервіс»","Бюджетні орг."),("ОСББ «Центральний»","ОСББ / ЖКГ"),
+        ("ТОВ «БудМаш»","Підприємства"),("ДП «Водоканал»","Бюджетні орг."),
+        ("ФОП Кравченко Л.П.","Населення"),("ОСББ «Садовий»","ОСББ / ЖКГ"),
+        ("ТОВ «ЕнергоПром»","Підприємства"),("ФОП Гнатюк О.В.","Населення"),
+        ("КЗ «СШ №15»","Бюджетні орг."),("ТОВ «Кормові культури»","Агросектор"),
+        ("ОСББ «Мрія»","ОСББ / ЖКГ"),("ТОВ «Мегалит»","Підприємства"),
+        ("ФОП Савченко І.С.","Населення"),
+    ]
+    _districts_ids = [d["id"] for d in CRM_DISTRICTS]
+    for nm, cat in _names:
+        debt = round(_rnd.uniform(12_000, 840_000), 2)
+        months_overdue = _rnd.randint(1, 18)
+        st.session_state.crm_debtors.append({
+            "Назва / ПІБ": nm,
+            "Категорія": cat,
+            "Дільниця": _rnd.choice(CRM_DISTRICTS)["name"],
+            "Борг (грн)": debt,
+            "Місяців прострочення": months_overdue,
+            "Статус": "⛔ Відключено" if months_overdue > 6 else ("⚠️ Попередження" if months_overdue > 2 else "🟡 Нагадування"),
+            "Останній платіж": (datetime.date.today() - datetime.timedelta(days=months_overdue * 30)).strftime("%d.%m.%Y"),
+        })
+
+# ==========================================
 # ГОЛОВНЕ МЕНЮ
 # ==========================================
 TAB_DEFINITIONS = {
@@ -193,13 +276,23 @@ TAB_DEFINITIONS = {
         ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"), ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
+        ("💰 CRM та Білінг", "crm"),
         ("💾 Data Центр", "data"), ("👥 Управління доступом", "users"),
+    ],
+    "crm_tabs": [
+        ("🏠 Головна", "home"),
+        ("💰 CRM та Білінг", "crm"),
     ],
     "brigade_tabs": [
         ("🏠 Головна", "home"), ("📱 Мобільний клієнт", "mobile"),
     ],
 }
-ROLE_TO_TAB_SET = {"dispatcher": "dispatcher_tabs", "admin": "admin_tabs", "brigade": "brigade_tabs"}
+ROLE_TO_TAB_SET = {
+    "dispatcher": "dispatcher_tabs",
+    "admin":      "admin_tabs",
+    "brigade":    "brigade_tabs",
+    "crm":        "crm_tabs",
+}
 active_tabs = TAB_DEFINITIONS[ROLE_TO_TAB_SET.get(user_role, "brigade_tabs")]
 tab_labels = [t[0] for t in active_tabs]
 tab_keys   = [t[1] for t in active_tabs]
@@ -323,18 +416,18 @@ if "home" in tab_map:
                     <h1 style="color:#f1f5f9;margin:0;font-size:2.1rem;line-height:1.2;">ГІС Диспетчерська Система</h1>
                     <div style="color:#60a5fa;font-size:1.1rem;margin-top:4px;">
                         Регіональних Електромереж&nbsp;&nbsp;
-                        <span style="background:#1d4ed8;color:#fff;border-radius:6px;padding:2px 10px;font-size:0.8rem;vertical-align:middle;">v5.0</span>
+                        <span style="background:#1d4ed8;color:#fff;border-radius:6px;padding:2px 10px;font-size:0.8rem;vertical-align:middle;">v6.0</span>
                     </div>
                 </div>
             </div>
             <p style="color:#94a3b8;font-size:1rem;max-width:700px;margin:1rem 0 0 0;line-height:1.7;">
-                Єдина цифрова платформа оперативного управління, моніторингу та технічного обслуговування
-                електричних мереж Вінницької області.
+                Єдина цифрова платформа оперативного управління, моніторингу, технічного обслуговування
+                та комерційного обліку електричних мереж Вінницької області.
             </p>
         </div>
         """, unsafe_allow_html=True)
 
-        s1, s2, s3, s4, s5 = st.columns(5)
+        s1, s2, s3, s4, s5, s6 = st.columns(6)
         def stat_card(col, icon, value, label, color="#38bdf8"):
             col.markdown(f"""
             <div style="background:#1e293b;border-radius:10px;padding:1rem 0.8rem;text-align:center;border:1px solid #334155;">
@@ -345,8 +438,11 @@ if "home" in tab_map:
         stat_card(s1,"🏭","8","Структурних одиниць")
         stat_card(s2,"🔌","26","Дільниць обслуговування")
         stat_card(s3,"⚡","148.5 МВт","Потужність мережі","#a78bfa")
-        stat_card(s4,"🗺️","6","ГІС-об'єктів в БД","#34d399")
-        stat_card(s5,"🚨","1","Активних аварій","#f87171")
+        total_consumers = sum(d["consumers_total"] for d in CRM_DISTRICTS)
+        stat_card(s4,"👥",f"{total_consumers:,}".replace(",","ʼ"),"Споживачів (CRM)","#34d399")
+        total_debt = sum(d["debt_uah"] for d in CRM_DISTRICTS)
+        stat_card(s5,"💸",f"{total_debt/1_000_000:.1f} млн","Загальний борг, грн","#fb923c")
+        stat_card(s6,"🚨","1","Активних аварій","#f87171")
 
         st.markdown("<div style='margin-top:2rem'></div>", unsafe_allow_html=True)
         col_feat, col_tech = st.columns([1.1, 0.9])
@@ -356,9 +452,10 @@ if "home" in tab_map:
                 ("🗺️","Диспетчер ГІС-мапи","Інтерактивна Folium-карта з шарами ЛЕП, зонами СО та кольоровими маркерами аварій."),
                 ("📱","Мобільний клієнт бригади","Цифровий наряд-допуск для виїзних бригад: чек-лист безпеки, звіт про виконану роботу."),
                 ("🌡️","SmartGrid AI — Аналітика","Симуляція навантаження залежно від температури (-20°C…+40°C), детекція аномалій напруги, Threshold Alerts."),
+                ("💰","CRM та Білінг","Дашборд оплат, теплова карта боргів по дільницях, калькулятор тарифних зон (2/3-зонний лічильник)."),
                 ("📋","Журнал подій","Повний аудит-лог з фільтрацією за типом події, критичністю та об'єктом."),
                 ("📅","Планування ТО","Графік регламентного технічного обслуговування."),
-                ("👥","Управління доступом","Рольова модель (Адмін / Диспетчер / Монтер). Тільки для адміністраторів."),
+                ("👥","Управління доступом","Рольова модель (Адмін / Диспетчер / Монтер / CRM). Тільки для адміністраторів."),
             ]
             for icon, title, desc in modules:
                 with st.container(border=True):
@@ -374,8 +471,9 @@ if "home" in tab_map:
                     <tr><td style="color:#60a5fa;padding:4px 0;">🖥️ Фреймворк</td><td>Streamlit ≥ 1.35</td></tr>
                     <tr><td style="color:#60a5fa;padding:4px 0;">🗺️ Картографія</td><td>Folium + streamlit-folium</td></tr>
                     <tr><td style="color:#60a5fa;padding:4px 0;">🌡️ SmartGrid AI</td><td>Температурна модель + Anomaly Detection</td></tr>
+                    <tr><td style="color:#60a5fa;padding:4px 0;">💰 CRM / Білінг</td><td>Теплова карта боргів, тарифний калькулятор</td></tr>
                     <tr><td style="color:#60a5fa;padding:4px 0;">📊 Аналітика</td><td>Pandas + Matplotlib</td></tr>
-                    <tr><td style="color:#60a5fa;padding:4px 0;">📦 Версія</td><td>v5.0 — травень 2026</td></tr>
+                    <tr><td style="color:#60a5fa;padding:4px 0;">📦 Версія</td><td>v6.0 — травень 2026</td></tr>
                 </table>
             </div>
             """, unsafe_allow_html=True)
@@ -405,7 +503,7 @@ if "home" in tab_map:
         st.markdown("""
         <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:10px;
                     padding:1rem 1.5rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;margin-top:1.5rem;">
-            <span style="color:#475569;font-size:0.8rem;">© 2026 АТ «Вінницяобленерго» — ГІС ДС v5.0</span>
+            <span style="color:#475569;font-size:0.8rem;">© 2026 АТ «Вінницяобленерго» — ГІС ДС v6.0</span>
             <span style="color:#475569;font-size:0.8rem;">🔒 Конфіденційна інформація. Доступ суворо за ролями.</span>
             <span style="color:#475569;font-size:0.8rem;">ІТ-відділ: it@voe.com.ua</span>
         </div>
@@ -492,8 +590,6 @@ if "map" in tab_map:
 # ==========================================
 # ВКЛАДКА: МОБІЛЬНИЙ КЛІЄНТ
 # ==========================================
-
-# Ініціалізація стану геолокації та фото
 if "geo_arrived" not in st.session_state:
     st.session_state.geo_arrived = False
 if "geo_lat" not in st.session_state:
@@ -503,17 +599,15 @@ if "geo_lon" not in st.session_state:
 if "voice_transcript" not in st.session_state:
     st.session_state.voice_transcript = ""
 if "uploaded_photos" not in st.session_state:
-    st.session_state.uploaded_photos = []   # список dict {name, data, source}
+    st.session_state.uploaded_photos = []
 if "camera_shots" not in st.session_state:
-    st.session_state.camera_shots = []      # знімки зі st.camera_input
+    st.session_state.camera_shots = []
 if "photo_input_mode" not in st.session_state:
-    st.session_state.photo_input_mode = "auto"   # "auto" | "camera" | "upload"
+    st.session_state.photo_input_mode = "auto"
 
-# Координати ТП-Шаргород-100 (еталон для звірки)
 TP_TARGET = {"name": "ТП-Шаргород-100", "lat": 48.7364, "lon": 28.0822}
 
 def haversine_km(lat1, lon1, lat2, lon2):
-    """Відстань між двома точками у км (формула Гаверсинусів)."""
     import math
     R = 6371.0
     dlat = math.radians(lat2 - lat1)
@@ -524,8 +618,6 @@ def haversine_km(lat1, lon1, lat2, lon2):
 if "mobile" in tab_map:
     with tab_map["mobile"]:
         st.title("📱 Цифровий кабінет лінійної бригади")
-
-        # ── Верхня панель статусу ────────────────────────────────────────
         hdr1, hdr2, hdr3 = st.columns(3)
         hdr1.markdown(f"""
         <div style="background:#1e293b;border-radius:8px;padding:0.7rem 1rem;border:1px solid #334155;">
@@ -548,10 +640,7 @@ if "mobile" in tab_map:
             <div style="color:#60a5fa;font-weight:600;font-size:0.9rem;">{_hdr_photo_count} фото прикріплено</div>
             <div style="color:#94a3b8;font-size:0.75rem;">{"✅ Готово до відправки" if _hdr_photo_count > 0 else "Фото не додано"}</div>
         </div>""", unsafe_allow_html=True)
-
         st.markdown("<div style='margin-top:1rem'></div>", unsafe_allow_html=True)
-
-        # ── Поточний наряд ───────────────────────────────────────────────
         st.markdown("""
         <div style="background:#1e3a5f;border-radius:10px;padding:0.9rem 1.2rem;
                     border:1px solid #1e4f8a;margin-bottom:1rem;">
@@ -583,54 +672,34 @@ if "mobile" in tab_map:
                     st.session_state.camera_shots = []
                     st.rerun()
         else:
-            # ── 4 блоки розташовані у 2 колонки ─────────────────────────
             col_left, col_right = st.columns([1, 1], gap="medium")
-
             with col_left:
-                # ── БЛОК 1: Геолокація ───────────────────────────────────
                 with st.container(border=True):
                     st.markdown("### 🛰️ Геолокація — «Я на місці»")
-                    st.caption("Натисніть кнопку після прибуття до об'єкта. Система звірить ваші координати з розташуванням ТП.")
-
+                    st.caption("Натисніть кнопку після прибуття до об'єкта.")
                     if st.session_state.geo_arrived:
-                        dist = haversine_km(
-                            st.session_state.geo_lat, st.session_state.geo_lon,
-                            TP_TARGET["lat"], TP_TARGET["lon"]
-                        )
+                        dist = haversine_km(st.session_state.geo_lat, st.session_state.geo_lon, TP_TARGET["lat"], TP_TARGET["lon"])
                         if dist < 0.5:
-                            st.success(f"✅ Прибуття підтверджено! Відстань до {TP_TARGET['name']}: **{dist*1000:.0f} м**")
+                            st.success(f"✅ Прибуття підтверджено! Відстань: **{dist*1000:.0f} м**")
                         else:
-                            st.warning(f"⚠️ Ви зафіксовані, але далеко від об'єкта: **{dist:.2f} км**")
+                            st.warning(f"⚠️ Далеко від об'єкта: **{dist:.2f} км**")
                         st.markdown(f"""
-                        <div style="background:#0f172a;border-radius:8px;padding:0.6rem 0.9rem;
-                                    font-size:0.82rem;color:#94a3b8;margin-top:0.5rem;">
-                            🕐 Час прибуття: <b style="color:#f1f5f9">{st.session_state.geo_time}</b><br>
+                        <div style="background:#0f172a;border-radius:8px;padding:0.6rem 0.9rem;font-size:0.82rem;color:#94a3b8;margin-top:0.5rem;">
+                            🕐 Час: <b style="color:#f1f5f9">{st.session_state.geo_time}</b><br>
                             📍 Координати: <b style="color:#60a5fa">{st.session_state.geo_lat:.4f}° N, {st.session_state.geo_lon:.4f}° E</b>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        </div>""", unsafe_allow_html=True)
                         if st.button("🔄 Оновити геопозицію", use_container_width=True):
                             st.session_state.geo_arrived = False
                             st.rerun()
                     else:
-                        st.markdown("""
-                        <div style="background:#0f172a;border-radius:8px;padding:0.7rem;
-                                    font-size:0.82rem;color:#64748b;text-align:center;margin-bottom:0.5rem;">
-                            ℹ️ Для демо-режиму координати симулюються поблизу ТП-Шаргород-100
-                        </div>""", unsafe_allow_html=True)
-
-                        geo_mode = st.radio("Режим визначення координат:", 
-                                            ["📡 Симуляція (поблизу ТП)", "📝 Ввести вручну"],
-                                            horizontal=True, label_visibility="collapsed")
-
+                        geo_mode = st.radio("Режим:", ["📡 Симуляція (поблизу ТП)", "📝 Ввести вручну"], horizontal=True, label_visibility="collapsed")
                         if geo_mode == "📝 Ввести вручну":
                             g1, g2 = st.columns(2)
                             manual_lat = g1.number_input("Широта (N)", value=48.7364, format="%.4f")
                             manual_lon = g2.number_input("Довгота (E)", value=28.0822, format="%.4f")
                         else:
-                            # Симуляція: точка поряд з ТП ±0.001°
                             manual_lat = TP_TARGET["lat"] + _rnd.uniform(-0.002, 0.002)
                             manual_lon = TP_TARGET["lon"] + _rnd.uniform(-0.002, 0.002)
-
                         if st.button("📍 Я на місці — зафіксувати прибуття", use_container_width=True, type="primary"):
                             now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
                             st.session_state.geo_lat   = round(manual_lat, 4)
@@ -639,26 +708,18 @@ if "mobile" in tab_map:
                             st.session_state.geo_arrived = True
                             dist = haversine_km(manual_lat, manual_lon, TP_TARGET["lat"], TP_TARGET["lon"])
                             st.session_state.log_data.insert(0, {
-                                "Час": now_str,
-                                "Тип": "Інспекція",
-                                "Об'єкт": TP_TARGET["name"],
-                                "Опис": (
-                                    f"[{current_user['display_name']}] 📍 ПРИБУТТЯ зафіксовано. "
-                                    f"Координати: {manual_lat:.4f}° N, {manual_lon:.4f}° E. "
-                                    f"Відстань до об'єкта: {dist*1000:.0f} м."
-                                ),
+                                "Час": now_str, "Тип": "Інспекція", "Об'єкт": TP_TARGET["name"],
+                                "Опис": f"[{current_user['display_name']}] 📍 ПРИБУТТЯ. Координати: {manual_lat:.4f}° N, {manual_lon:.4f}° E. Відстань: {dist*1000:.0f} м.",
                                 "Критичність": "Висока"
                             })
                             st.rerun()
 
-                # ── БЛОК 2: Чек-лист безпеки ────────────────────────────
                 with st.container(border=True):
                     st.markdown("### ✅ Чек-лист безпеки (ПУЕ)")
                     tb_1 = st.checkbox("⚡ Заземлення встановлено на всіх фазах")
                     tb_2 = st.checkbox("🪧 Плакати з техніки безпеки розвішано")
                     tb_3 = st.checkbox("🔒 Комутаційні апарати заблоковано")
                     tb_4 = st.checkbox("👷 Склад бригади проінструктовано")
-
                     safety_ok = tb_1 and tb_2 and tb_3 and tb_4
                     if safety_ok:
                         st.success("✅ Чек-лист повністю виконано")
@@ -667,285 +728,107 @@ if "mobile" in tab_map:
                         st.warning(f"⚠️ Залишилось пунктів: {remaining}")
 
             with col_right:
-                # ── БЛОК 3: Фотозвіт (розумний вибір камера / файл) ─────
                 with st.container(border=True):
                     st.markdown("### 📸 Фотозвіт (до та після робіт)")
-
-                    # --- Детектор user-agent для автовизначення мобільного ---
-                    # Читаємо заголовок через st.context (Streamlit ≥ 1.37)
-                    # або через query_params як fallback
                     try:
                         ua = st.context.headers.get("user-agent", "").lower()
                     except Exception:
                         ua = ""
-                    is_mobile = any(kw in ua for kw in [
-                        "android", "iphone", "ipad", "mobile", "ipod"
-                    ])
-
-                    # --- Перемикач режиму ---
+                    is_mobile = any(kw in ua for kw in ["android", "iphone", "ipad", "mobile", "ipod"])
                     mode_labels = {
                         "auto":   f"🤖 Авто ({'📱 Камера' if is_mobile else '🖥️ Файл'})",
-                        "camera": "📷 Камера (camera_input)",
-                        "upload": "🗂️ Файл / Галерея (file_uploader)",
+                        "camera": "📷 Камера",
+                        "upload": "🗂️ Файл / Галерея",
                     }
-                    chosen_mode = st.radio(
-                        "Режим введення фото:",
-                        options=list(mode_labels.keys()),
-                        format_func=lambda k: mode_labels[k],
-                        horizontal=True,
-                        key="photo_mode_radio",
-                        label_visibility="collapsed",
-                    )
+                    chosen_mode = st.radio("Режим:", options=list(mode_labels.keys()),
+                                          format_func=lambda k: mode_labels[k], horizontal=True,
+                                          key="photo_mode_radio", label_visibility="collapsed")
                     st.session_state.photo_input_mode = chosen_mode
+                    effective = ("camera" if is_mobile else "upload") if chosen_mode == "auto" else chosen_mode
 
-                    # Ефективний режим після авто-детекції
-                    effective = (
-                        ("camera" if is_mobile else "upload")
-                        if chosen_mode == "auto"
-                        else chosen_mode
-                    )
-
-                    # Підказка чому обрано цей режим
-                    if chosen_mode == "auto":
-                        if is_mobile:
-                            st.caption("📱 Виявлено мобільний пристрій — увімкнено пряму камеру.")
-                        else:
-                            st.caption("🖥️ Десктоп — активовано завантаження файлів. Переключіться на «Камера» для веб-камери.")
-
-                    # ═══════════════════════════════════════════════════════
-                    # РЕЖИМ A: st.camera_input  (пряма камера)
-                    # ═══════════════════════════════════════════════════════
                     if effective == "camera":
-                        st.markdown("""
-                        <div style="background:#0f172a;border-radius:8px;padding:6px 12px;
-                                    font-size:0.78rem;color:#64748b;margin-bottom:6px;">
-                            📷 <b style="color:#60a5fa;">st.camera_input</b> — натисніть кнопку щоб зробити знімок.
-                            Кожен знімок додається до фотозвіту.
-                        </div>""", unsafe_allow_html=True)
-
-                        new_shot = st.camera_input(
-                            "Зробіть знімок об'єкта:",
-                            key="cam_shot",
-                            help="Натисніть 'Take Photo' — знімок одразу додасться до наряду"
-                        )
-
+                        new_shot = st.camera_input("Зробіть знімок:", key="cam_shot")
                         if new_shot is not None:
-                            # Перевіряємо чи цей знімок вже доданий (по байтах)
                             new_bytes = new_shot.getvalue()
-                            already = any(
-                                s.get("bytes") == new_bytes
-                                for s in st.session_state.camera_shots
-                            )
+                            already = any(s.get("bytes") == new_bytes for s in st.session_state.camera_shots)
                             if not already:
                                 ts = datetime.datetime.now().strftime("%H:%M:%S")
-                                st.session_state.camera_shots.append({
-                                    "name": f"Знімок_{ts}.jpg",
-                                    "bytes": new_bytes,
-                                    "source": "camera",
-                                    "ts": ts,
-                                })
-                                st.toast(f"📸 Знімок {len(st.session_state.camera_shots)} додано до наряду!")
-
-                        # Галерея накопичених знімків
+                                st.session_state.camera_shots.append({"name": f"Знімок_{ts}.jpg", "bytes": new_bytes, "source": "camera", "ts": ts})
+                                st.toast(f"📸 Знімок {len(st.session_state.camera_shots)} додано!")
                         if st.session_state.camera_shots:
                             n = len(st.session_state.camera_shots)
                             st.success(f"✅ У фотозвіті: **{n} знімків**")
-                            with st.expander(f"🖼️ Галерея знімків ({n} шт.)", expanded=(n <= 3)):
-                                gcols = st.columns(2)
-                                for i, shot in enumerate(st.session_state.camera_shots):
-                                    with gcols[i % 2]:
-                                        st.image(shot["bytes"], caption=f"📷 {shot['name']}", use_container_width=True)
-                                        # Кнопка видалення окремого знімка
-                                        if st.button(f"🗑️ Видалити", key=f"del_shot_{i}"):
-                                            st.session_state.camera_shots.pop(i)
-                                            st.rerun()
-                            if st.button("🗑️ Очистити всі знімки", use_container_width=True):
-                                st.session_state.camera_shots = []
-                                st.rerun()
-                        else:
-                            st.markdown("""
-                            <div style="border:2px dashed #334155;border-radius:10px;
-                                        padding:1.2rem;text-align:center;color:#475569;margin-top:0.3rem;">
-                                <div style="font-size:2rem;">📷</div>
-                                <div style="font-size:0.82rem;margin-top:0.4rem;">
-                                    Натисніть <b>«Take Photo»</b> вище — кожен знімок<br>
-                                    автоматично додається до звіту наряду.
-                                </div>
-                            </div>""", unsafe_allow_html=True)
-
-                    # ═══════════════════════════════════════════════════════
-                    # РЕЖИМ B: st.file_uploader  (файли / галерея)
-                    # ═══════════════════════════════════════════════════════
                     else:
-                        st.markdown("""
-                        <div style="background:#0f172a;border-radius:8px;padding:6px 12px;
-                                    font-size:0.78rem;color:#64748b;margin-bottom:6px;">
-                            🗂️ <b style="color:#60a5fa;">st.file_uploader</b> — оберіть файли з галереї або файлової системи.
-                            На мобільному браузері також пропонується камера.
-                        </div>""", unsafe_allow_html=True)
-
-                        uploaded_files = st.file_uploader(
-                            "Оберіть фото (можна кілька):",
-                            type=["jpg", "jpeg", "png", "webp", "heic"],
-                            accept_multiple_files=True,
-                            key="photo_uploader",
-                            help="Оберіть 1 або кілька фото з пристрою"
-                        )
-
+                        uploaded_files = st.file_uploader("Оберіть фото:", type=["jpg","jpeg","png","webp","heic"],
+                                                          accept_multiple_files=True, key="photo_uploader")
                         if uploaded_files:
-                            st.session_state.uploaded_photos = [
-                                {"name": f.name, "bytes": f.getvalue(), "source": "upload"}
-                                for f in uploaded_files
-                            ]
-                            n = len(uploaded_files)
-                            st.success(f"✅ Прикріплено {n} фото з файлової системи")
-                            if n <= 4:
-                                pcols = st.columns(min(n, 2))
-                                for i, f in enumerate(uploaded_files):
-                                    with pcols[i % 2]:
-                                        st.image(f, caption=f"📷 {f.name}", use_container_width=True)
-                            else:
-                                with st.expander(f"🖼️ Переглянути всі {n} фото"):
-                                    gc2 = st.columns(2)
-                                    for i, f in enumerate(uploaded_files):
-                                        with gc2[i % 2]:
-                                            st.image(f, caption=f.name, use_container_width=True)
-                        else:
-                            st.markdown("""
-                            <div style="border:2px dashed #334155;border-radius:10px;
-                                        padding:1.5rem;text-align:center;color:#475569;margin-top:0.3rem;">
-                                <div style="font-size:2rem;">📁</div>
-                                <div style="font-size:0.85rem;margin-top:0.4rem;">
-                                    Перетягніть фото або натисніть <b>«Browse files»</b><br>
-                                    <span style="color:#60a5fa;">Підтримуються JPG, PNG, WEBP, HEIC</span>
-                                </div>
-                            </div>""", unsafe_allow_html=True)
+                            st.session_state.uploaded_photos = [{"name": f.name, "bytes": f.getvalue(), "source": "upload"} for f in uploaded_files]
+                            st.success(f"✅ Прикріплено {len(uploaded_files)} фото")
 
-                    # --- Підсумковий лічильник фото (обидва режими) ---
-                    total_photos = len(st.session_state.camera_shots) + len(st.session_state.uploaded_photos)
-                    photo_count = total_photos  # передаємо далі для прогрес-бару
+                    photo_count = len(st.session_state.camera_shots) + len(st.session_state.uploaded_photos)
 
-                # ── БЛОК 4: Голосовий / текстовий звіт ──────────────────
                 with st.container(border=True):
                     st.markdown("### 🎙️ Звіт про виконану роботу")
-
-                    report_mode = st.radio(
-                        "Спосіб введення:", 
-                        ["⌨️ Текстовий", "🎙️ Голосова замітка (транскрипція)"],
-                        horizontal=True, label_visibility="collapsed"
-                    )
-
-                    if report_mode == "🎙️ Голосова замітка (транскрипція)":
-                        st.markdown("""
-                        <div style="background:#1e293b;border-radius:8px;padding:0.8rem 1rem;
-                                    border-left:3px solid #60a5fa;margin-bottom:0.5rem;">
-                            <div style="color:#60a5fa;font-weight:600;font-size:0.85rem;">🤖 AI Транскрипція (симуляція)</div>
-                            <div style="color:#94a3b8;font-size:0.78rem;margin-top:3px;">
-                                На реальному пристрої тут підключається Whisper API або Web Speech API.
-                                Для демо — введіть текст у поле нижче, натисніть «Транскрибувати».
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-
-                        voice_input = st.text_input(
-                            "🎤 Диктуйте (або введіть текст для симуляції):",
-                            placeholder="Наприклад: Ізолятор замінено, кріплення перевірено, напруга в нормі...",
-                            key="voice_raw_input"
-                        )
+                    report_mode = st.radio("Спосіб:", ["⌨️ Текстовий", "🎙️ Голосова замітка"], horizontal=True, label_visibility="collapsed")
+                    if report_mode == "🎙️ Голосова замітка":
+                        voice_input = st.text_input("🎤 Диктуйте:", placeholder="Роботи виконано...", key="voice_raw_input")
                         v1, v2 = st.columns([1, 1])
                         with v1:
                             if st.button("🎙️ Транскрибувати", use_container_width=True):
                                 if voice_input.strip():
-                                    timestamp = datetime.datetime.now().strftime("%H:%M")
-                                    st.session_state.voice_transcript = (
-                                        f"[🎙️ Голосова замітка {timestamp}]: {voice_input.strip()}"
-                                    )
+                                    ts = datetime.datetime.now().strftime("%H:%M")
+                                    st.session_state.voice_transcript = f"[🎙️ {ts}]: {voice_input.strip()}"
                                     st.toast("✅ Транскрипцію завершено!")
-                                else:
-                                    st.warning("Спочатку введіть або продиктуйте текст.")
                         with v2:
-                            quick_templates = st.selectbox(
-                                "📝 Швидкий шаблон:",
-                                ["— оберіть —", "Роботи виконано в повному обсязі", 
-                                 "Замінено ізолятор, пошкоджень не виявлено",
-                                 "Виявлено корозію кріплення, потребує заміни",
-                                 "Вимикач перевірено, контакти в нормі"],
-                                label_visibility="collapsed"
-                            )
+                            quick_templates = st.selectbox("📝 Шаблон:", ["— оберіть —","Роботи виконано в повному обсязі","Замінено ізолятор, пошкоджень не виявлено","Виявлено корозію кріплення","Вимикач перевірено, контакти в нормі"], label_visibility="collapsed")
                             if quick_templates != "— оберіть —":
                                 st.session_state.voice_transcript = quick_templates
-
-                        if st.session_state.voice_transcript:
-                            st.markdown(f"""
-                            <div style="background:#0f172a;border-radius:8px;padding:0.7rem 0.9rem;
-                                        border:1px solid #334155;font-size:0.85rem;color:#e2e8f0;
-                                        margin-top:0.3rem;">
-                                <span style="color:#a78bfa;">📝 Транскрипт:</span><br>{st.session_state.voice_transcript}
-                            </div>
-                            """, unsafe_allow_html=True)
                         comment = st.session_state.voice_transcript
-
                     else:
-                        comment = st.text_area(
-                            "Текстовий звіт:",
-                            placeholder="Опишіть виконані роботи, виявлені дефекти, стан обладнання...",
-                            height=120,
-                            key="text_comment"
-                        )
+                        comment = st.text_area("Текстовий звіт:", placeholder="Опишіть виконані роботи...", height=120, key="text_comment")
 
-            # ── Кнопка закриття наряду (повна ширина) ───────────────────
             st.markdown("<div style='margin-top:0.5rem'></div>", unsafe_allow_html=True)
-
             all_checks = tb_1 and tb_2 and tb_3 and tb_4
             has_comment = bool(comment and comment.strip())
             has_geo = st.session_state.geo_arrived
-
-            # Прогрес-індикатор готовності
             readiness = sum([all_checks, has_comment, has_geo, photo_count > 0])
             readiness_pct = int(readiness / 4 * 100)
-            readiness_colors = {0: "#ef4444", 1: "#f59e0b", 2: "#fbbf24", 3: "#a3e635", 4: "#22c55e"}
+            readiness_colors = {0:"#ef4444",1:"#f59e0b",2:"#fbbf24",3:"#a3e635",4:"#22c55e"}
             readiness_color = readiness_colors.get(readiness, "#64748b")
-
             st.markdown(f"""
-            <div style="background:#1e293b;border-radius:10px;padding:0.8rem 1.2rem;
-                        border:1px solid #334155;margin-bottom:0.8rem;">
+            <div style="background:#1e293b;border-radius:10px;padding:0.8rem 1.2rem;border:1px solid #334155;margin-bottom:0.8rem;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                     <span style="color:#94a3b8;font-size:0.82rem;font-weight:600;">📊 Готовність наряду до закриття</span>
                     <span style="color:{readiness_color};font-weight:700;">{readiness_pct}%</span>
                 </div>
                 <div style="background:#0f172a;border-radius:6px;height:8px;overflow:hidden;">
-                    <div style="background:{readiness_color};width:{readiness_pct}%;height:100%;
-                                border-radius:6px;transition:width 0.3s;"></div>
+                    <div style="background:{readiness_color};width:{readiness_pct}%;height:100%;border-radius:6px;"></div>
                 </div>
                 <div style="display:flex;gap:1rem;margin-top:8px;font-size:0.75rem;flex-wrap:wrap;">
-                    <span style="color:{'#22c55e' if all_checks else '#475569'};">{'✅' if all_checks else '⬜'} Чек-лист безпеки</span>
-                    <span style="color:{'#22c55e' if has_geo else '#475569'};">{'✅' if has_geo else '⬜'} GPS-прибуття</span>
+                    <span style="color:{'#22c55e' if all_checks else '#475569'};">{'✅' if all_checks else '⬜'} Чек-лист</span>
+                    <span style="color:{'#22c55e' if has_geo else '#475569'};">{'✅' if has_geo else '⬜'} GPS</span>
                     <span style="color:{'#22c55e' if has_comment else '#475569'};">{'✅' if has_comment else '⬜'} Звіт</span>
                     <span style="color:{'#22c55e' if photo_count > 0 else '#475569'};">{'✅' if photo_count > 0 else '⬜'} Фото ({photo_count})</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
-
             btn_label = "🚀 Закрити наряд-допуск та відправити звіт" if readiness == 4 else f"🚀 Закрити наряд ({readiness_pct}% готовності)"
             if st.button(btn_label, use_container_width=True, type="primary"):
                 if not all_checks:
-                    st.error("❌ Заповніть усі пункти чек-листа безпеки (ПУЕ)!")
+                    st.error("❌ Заповніть усі пункти чек-листа безпеки!")
                 elif not has_comment:
-                    st.error("❌ Введіть або продиктуйте звіт про виконану роботу!")
+                    st.error("❌ Введіть звіт про виконану роботу!")
                 else:
                     now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
-                    geo_info = f" | GPS: {st.session_state.geo_lat:.4f}° N, {st.session_state.geo_lon:.4f}° E" if has_geo else " | GPS: не зафіксовано"
+                    geo_info = f" | GPS: {st.session_state.geo_lat:.4f}° N, {st.session_state.geo_lon:.4f}° E" if has_geo else ""
                     photo_info = f" | Фото: {photo_count} шт." if photo_count > 0 else ""
                     st.session_state.log_data.insert(0, {
-                        "Час": now_str,
-                        "Тип": "Планове ТО",
-                        "Об'єкт": "ТП-Шаргород-100",
+                        "Час": now_str, "Тип": "Планове ТО", "Об'єкт": "ТП-Шаргород-100",
                         "Опис": f"[{current_user['display_name']}]{geo_info}{photo_info}: {comment.strip()}",
                         "Критичність": "Висока"
                     })
                     st.session_state.task_closed = True
                     st.rerun()
-
         st.markdown("---")
 
 # ==========================================
@@ -960,323 +843,579 @@ if "structure" in tab_map:
             st.subheader("📁 Структурні Одиниці (СО)")
             for em, info in st.session_state.org_structure.items():
                 with st.expander(f"📌 {em} (База: {info['база']})"):
-                    st.markdown("**Зона обслуговування (Покриття дільниць):**")
+                    st.markdown("**Зона обслуговування:**")
                     for sub in info["дільниці"]:
                         st.write(f"• {sub} дільниця")
         with col_shargorod:
-            st.subheader("📍 Особливий статус: Шаргородський регіон")
-            st.info("ℹ️ Шаргород та колишній Шаргородський район повністю охоплюються АТ «Вінницяобленерго». Адміністративно Шаргородська дільниця входить до складу структури СО «Жмеринські електричні мережі».")
+            st.subheader("📍 Шаргородський регіон")
+            st.info("ℹ️ Шаргородська дільниця входить до складу СО «Жмеринські електричні мережі».")
             box_sh = st.container(border=True)
-            box_sh.markdown("### 🏢 Безпосередньо у місті Шаргород діють:")
+            box_sh.markdown("### 🏢 У місті Шаргород діють:")
             box_sh.markdown("""
-            * **🔧 Шаргородська дільниця** — технічне обслуговування мереж, поточний та капітальний ремонт.
-            * **👥 Центр обслуговування клієнтів (ЦОК)** — прийом споживачів з питань нових приєднань, технічних умов.
+            * **🔧 Шаргородська дільниця** — технічне обслуговування мереж.
+            * **👥 Центр обслуговування клієнтів (ЦОК)** — прийом споживачів.
             """)
-            st.caption("🗺️ Локація сервісної інфраструктури в м. Шаргород:")
             if FOLIUM_AVAILABLE:
                 sh_map = folium.Map(location=[48.7377,28.0813], zoom_start=15, tiles="CartoDB dark_matter")
                 sh_objects = [
-                    {"name":"ТП-Шаргород-100","latitude":48.7364,"longitude":28.0822,"type":"Підстанція",
-                     "status":"Нормальна","criticality":"Висока","subdivision":"СО «Жмеринські ЕМ»","desc":"ВН-35/10 кВ."},
-                    {"name":"ЦОК Шаргород","latitude":48.7390,"longitude":28.0805,"type":"Центр клієнтів",
-                     "status":"Нормальна","criticality":"Низька","subdivision":"СО «Жмеринські ЕМ»","desc":"Прийом споживачів."},
+                    {"name":"ТП-Шаргород-100","latitude":48.7364,"longitude":28.0822,"type":"Підстанція","status":"Нормальна","criticality":"Висока","subdivision":"СО «Жмеринські ЕМ»","desc":"ВН-35/10 кВ."},
+                    {"name":"ЦОК Шаргород","latitude":48.7390,"longitude":28.0805,"type":"Центр клієнтів","status":"Нормальна","criticality":"Низька","subdivision":"СО «Жмеринські ЕМ»","desc":"Прийом споживачів."},
                 ]
                 for o in sh_objects:
                     folium.Marker(location=[o["latitude"],o["longitude"]], tooltip=o["name"],
                                   popup=folium.Popup(build_popup_html(o), max_width=280),
-                                  icon=folium.Icon(color=get_marker_color(o["status"]),
-                                                  icon=get_marker_icon(o["type"]), prefix="fa")).add_to(sh_map)
-                folium.PolyLine([[48.7364,28.0822],[48.7390,28.0805]], color="#4ade80", weight=2,
-                                dash_array="4 3", tooltip="КЛ 10 кВ: ТП-100 → ЦОК").add_to(sh_map)
+                                  icon=folium.Icon(color=get_marker_color(o["status"]), icon=get_marker_icon(o["type"]), prefix="fa")).add_to(sh_map)
+                folium.PolyLine([[48.7364,28.0822],[48.7390,28.0805]], color="#4ade80", weight=2, dash_array="4 3").add_to(sh_map)
                 st_folium(sh_map, width="100%", height=300, returned_objects=[])
-            else:
-                sh_df = pd.DataFrame([
-                    {"name":"ТП-Шаргород-100","latitude":48.7364,"longitude":28.0822},
-                    {"name":"ЦОК Шаргород","latitude":48.7390,"longitude":28.0805}
-                ])
-                st.map(sh_df, zoom=13, size=45)
 
 # ==========================================
-# ВКЛАДКА: АНАЛІТИКА ТА KPI (SmartGrid AI)
+# ВКЛАДКА: АНАЛІТИКА ТА KPI
 # ==========================================
 if "analytics" in tab_map:
     with tab_map["analytics"]:
         st.title("📊 SmartGrid AI — Інтелектуальна аналітика мережі")
-
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Індекс надійності SAIDI", "42.5 хв/рік", "-3.2 хв від плану", delta_color="inverse")
         m2.metric("Індекс частоти вимкнень SAIFI", "1.14 од/рік", "+0.02", delta_color="inverse")
-        m3.metric("Загальна потужність споживання", "148.5 МВт", "Норма")
-        m4.metric("Коефіцієнт корисного використання", "94.2%", "+0.5%")
-
+        m3.metric("Загальна потужність", "148.5 МВт", "Норма")
+        m4.metric("КВВ", "94.2%", "+0.5%")
         st.markdown("---")
-
-        # ── БЛОК 1: Симуляція навантаження ─────────────────────────────
-        st.markdown("### 🌡️ SmartGrid AI — Симуляція навантаження за температурою")
-
+        st.markdown("### 🌡️ SmartGrid AI — Симуляція навантаження")
         col_ctrl, col_info = st.columns([2, 1])
         with col_ctrl:
-            temperature = st.slider(
-                "🌡️ Температура зовнішнього середовища (°C)",
-                min_value=-20, max_value=40, value=15, step=1,
-                help="Зміна температури впливає на прогнозоване навантаження мережі"
-            )
+            temperature = st.slider("🌡️ Температура (°C)", min_value=-20, max_value=40, value=15, step=1)
         with col_info:
-            if temperature <= -10:
-                season_label, season_color = "❄️ Сильні морози", "#60a5fa"
-            elif temperature <= 0:
-                season_label, season_color = "🌨️ Зима", "#93c5fd"
-            elif temperature <= 10:
-                season_label, season_color = "🌤️ Прохолодна погода", "#6ee7b7"
-            elif temperature <= 20:
-                season_label, season_color = "🌿 Весна / Осінь", "#34d399"
-            elif temperature <= 30:
-                season_label, season_color = "☀️ Тепло", "#fbbf24"
-            else:
-                season_label, season_color = "🔥 Спека / Кондиціонери", "#f87171"
-            st.markdown(f"""
-            <div style="background:#1e293b;border-radius:10px;padding:0.9rem 1.1rem;
-                        border-left:4px solid {season_color};margin-top:0.4rem;">
-                <div style="color:{season_color};font-weight:700;font-size:1rem;">{season_label}</div>
-                <div style="color:#94a3b8;font-size:0.82rem;margin-top:4px;">
-                    Поточна t°: <b style="color:#f1f5f9">{temperature}°C</b>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
+            if temperature <= -10: season_label, season_color = "❄️ Сильні морози", "#60a5fa"
+            elif temperature <= 0: season_label, season_color = "🌨️ Зима", "#93c5fd"
+            elif temperature <= 10: season_label, season_color = "🌤️ Прохолодна погода", "#6ee7b7"
+            elif temperature <= 20: season_label, season_color = "🌿 Весна / Осінь", "#34d399"
+            elif temperature <= 30: season_label, season_color = "☀️ Тепло", "#fbbf24"
+            else: season_label, season_color = "🔥 Спека", "#f87171"
+            st.markdown(f"""<div style="background:#1e293b;border-radius:10px;padding:0.9rem 1.1rem;border-left:4px solid {season_color};margin-top:0.4rem;">
+                <div style="color:{season_color};font-weight:700;">{season_label}</div>
+                <div style="color:#94a3b8;font-size:0.82rem;margin-top:4px;">t°: <b style="color:#f1f5f9">{temperature}°C</b></div>
+            </div>""", unsafe_allow_html=True)
         BASE_LOAD = [65, 50, 85, 110, 140, 148, 90]
         hours = [f"{i}:00" for i in range(0, 25, 4)]
-        LOAD_THRESHOLD_HIGH = 160.0
-        LOAD_THRESHOLD_LOW  = 35.0
-
+        LOAD_THRESHOLD_HIGH = 160.0; LOAD_THRESHOLD_LOW = 35.0
         def compute_load_for_temp(base_load, temp):
-            if temp < 0:
-                factor = 1.0 + 0.04 * abs(temp)
-            elif temp <= 20:
-                factor = 1.0 - 0.015 * (temp - 15)
-            else:
-                factor = 0.925 + 0.025 * (temp - 20)
+            if temp < 0: factor = 1.0 + 0.04 * abs(temp)
+            elif temp <= 20: factor = 1.0 - 0.015 * (temp - 15)
+            else: factor = 0.925 + 0.025 * (temp - 20)
             return [round(v * factor, 1) for v in base_load]
-
         predicted_load = compute_load_for_temp(BASE_LOAD, temperature)
-        actual_load    = [v + (i % 3 - 1) * 2.5 for i, v in enumerate(predicted_load)]
-        overload_hours  = [hours[i] for i, v in enumerate(predicted_load) if v > LOAD_THRESHOLD_HIGH]
+        actual_load = [v + (i % 3 - 1) * 2.5 for i, v in enumerate(predicted_load)]
+        overload_hours = [hours[i] for i, v in enumerate(predicted_load) if v > LOAD_THRESHOLD_HIGH]
         underload_hours = [hours[i] for i, v in enumerate(predicted_load) if v < LOAD_THRESHOLD_LOW]
-
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.2))
         fig.patch.set_facecolor("#0f172a")
         ax1.set_facecolor("#1e293b")
-        ax1.plot(hours, actual_load, label="Фактичне навантаження (МВт)",
-                 color="#38bdf8", marker="o", linewidth=2.5, markersize=6)
-        ax1.plot(hours, predicted_load, label=f"Прогноз SmartGrid AI ({temperature}°C)",
-                 color="#a855f7", linestyle="--", linewidth=2)
-        ax1.axhline(y=LOAD_THRESHOLD_HIGH, color="#ef4444", linestyle=":", linewidth=1.5,
-                    label=f"Верхня межа ({LOAD_THRESHOLD_HIGH} МВт)")
-        ax1.axhline(y=LOAD_THRESHOLD_LOW,  color="#f59e0b", linestyle=":", linewidth=1.5,
-                    label=f"Нижня межа ({LOAD_THRESHOLD_LOW} МВт)")
-        ax1.fill_between(range(len(hours)), LOAD_THRESHOLD_HIGH,
-                         [max(v, LOAD_THRESHOLD_HIGH) for v in predicted_load],
-                         color="#ef4444", alpha=0.15, label="⚠️ Перевантаження")
-        ax1.fill_between(range(len(hours)), LOAD_THRESHOLD_LOW,
-                         [min(v, LOAD_THRESHOLD_LOW) for v in predicted_load],
-                         color="#f59e0b", alpha=0.15, label="⚠️ Недовантаження")
-        ax1.set_xticks(range(len(hours)))
-        ax1.set_xticklabels(hours, color="#94a3b8", fontsize=8)
+        ax1.plot(hours, actual_load, label="Фактичне навантаження (МВт)", color="#38bdf8", marker="o", linewidth=2.5, markersize=6)
+        ax1.plot(hours, predicted_load, label=f"Прогноз SmartGrid AI ({temperature}°C)", color="#a855f7", linestyle="--", linewidth=2)
+        ax1.axhline(y=LOAD_THRESHOLD_HIGH, color="#ef4444", linestyle=":", linewidth=1.5)
+        ax1.axhline(y=LOAD_THRESHOLD_LOW, color="#f59e0b", linestyle=":", linewidth=1.5)
+        ax1.set_xticks(range(len(hours))); ax1.set_xticklabels(hours, color="#94a3b8", fontsize=8)
         ax1.set_title(f"Прогноз навантаження при {temperature}°C", color="#f1f5f9", fontsize=10)
         ax1.legend(fontsize=7, facecolor="#1e293b", edgecolor="#334155", labelcolor="#cbd5e1")
-        ax1.grid(True, alpha=0.15, color="#334155")
-        ax1.tick_params(colors="#64748b")
-        ax1.spines[:].set_color("#334155")
-        ax1.set_ylabel("МВт", color="#64748b", fontsize=9)
-        ax1.set_ylim(0, 200)
-
+        ax1.grid(True, alpha=0.15, color="#334155"); ax1.tick_params(colors="#64748b"); ax1.spines[:].set_color("#334155")
+        ax1.set_ylabel("МВт", color="#64748b", fontsize=9); ax1.set_ylim(0, 200)
         ax2.set_facecolor("#1e293b")
         current_logs_df = pd.DataFrame(st.session_state.log_data)
         types_distribution = current_logs_df["Тип"].value_counts()
-        wedge_colors = ["#ef4444", "#f59e0b", "#10b981", "#38bdf8", "#bc5090"]
-        wedges, texts, autotexts = ax2.pie(
-            types_distribution.values, labels=types_distribution.index,
-            colors=wedge_colors[:len(types_distribution)], autopct="%1.1f%%", startangle=90,
-            wedgeprops=dict(edgecolor="#0f172a", linewidth=2)
-        )
+        wedge_colors = ["#ef4444","#f59e0b","#10b981","#38bdf8","#bc5090"]
+        wedges, texts, autotexts = ax2.pie(types_distribution.values, labels=types_distribution.index, colors=wedge_colors[:len(types_distribution)], autopct="%1.1f%%", startangle=90, wedgeprops=dict(edgecolor="#0f172a", linewidth=2))
         for t in texts: t.set_color("#94a3b8"); t.set_fontsize(8)
         for at in autotexts: at.set_color("#f1f5f9"); at.set_fontsize(8)
         ax2.set_title("Розподіл подій у журналі", color="#f1f5f9", fontsize=10)
-        plt.tight_layout(pad=2.0)
-        st.pyplot(fig)
-        plt.close(fig)
+        plt.tight_layout(pad=2.0); st.pyplot(fig); plt.close(fig)
+        if overload_hours:
+            st.error(f"🚨 Прогнозується перевантаження в: **{', '.join(overload_hours)}**")
+        else:
+            st.success(f"✅ Прогнозоване навантаження при {temperature}°C в межах норми. Пік: **{max(predicted_load)} МВт**.")
 
-        # ── БЛОК 2: Детекція аномалій ───────────────────────────────────
-        st.markdown("---")
-        st.markdown("### 🚨 SmartGrid AI — Детекція аномалій та Threshold Alerts")
+# ==========================================
+# 💰 ВКЛАДКА: CRM ТА БІЛІНГ
+# ==========================================
+if "crm" in tab_map:
+    with tab_map["crm"]:
+        st.title("💰 CRM та Комерційний облік — АТ «Вінницяобленерго»")
 
-        _rnd.seed(temperature + 42)
+        # ── KPI рядок ───────────────────────────────────────────────────
+        total_consumers = sum(d["consumers_total"] for d in CRM_DISTRICTS)
+        total_paid      = sum(d["consumers_paid"]   for d in CRM_DISTRICTS)
+        total_debt      = sum(d["debt_uah"]          for d in CRM_DISTRICTS)
+        total_kwh       = sum(d["consumption_kwh"]   for d in CRM_DISTRICTS)
+        avg_pay_pct     = round(total_paid / total_consumers * 100, 1)
+        total_revenue   = round(total_kwh * TARIFF_SINGLE / 1_000_000, 2)
 
-        VOLTAGE_NORMS = {
-            "Підстанція 110 кВ": {"nom": 110.0, "low": 100.0, "high": 120.0},
-            "Підстанція 35 кВ":  {"nom": 35.0,  "low": 31.5,  "high": 38.5},
-            "Підстанція 10 кВ":  {"nom": 10.0,  "low": 9.0,   "high": 11.0},
-            "Лінія 10 кВ":       {"nom": 10.0,  "low": 8.8,   "high": 10.5},
-        }
+        kc1, kc2, kc3, kc4, kc5 = st.columns(5)
+        def crm_kpi(col, icon, value, label, delta=None, delta_color="#22c55e"):
+            delta_html = f'<div style="color:{delta_color};font-size:0.75rem;margin-top:2px;">{delta}</div>' if delta else ""
+            col.markdown(f"""
+            <div style="background:#1e293b;border-radius:10px;padding:0.9rem 0.7rem;text-align:center;border:1px solid #334155;">
+                <div style="font-size:1.5rem;">{icon}</div>
+                <div style="color:#f1f5f9;font-size:1.3rem;font-weight:700;line-height:1.2;">{value}</div>
+                <div style="color:#64748b;font-size:0.72rem;margin-top:3px;">{label}</div>
+                {delta_html}
+            </div>""", unsafe_allow_html=True)
 
-        def simulate_voltage(obj, temp):
-            base_voltages = {
-                "ТП-12":           ("Підстанція 110 кВ", 110.0),
-                "ТП-28":           ("Підстанція 35 кВ",  35.0),
-                "ТП-245":          ("Підстанція 10 кВ",  10.0),
-                "ТП-Шаргород-100": ("Підстанція 35 кВ",  35.0),
-                "ЦОК Шаргород":    ("Лінія 10 кВ",       10.0),
-                "Оп. №9":          ("Лінія 10 кВ",       10.0),
-            }
-            vtype, vnom = base_voltages.get(obj["name"], ("Підстанція 10 кВ", 10.0))
-            norm = VOLTAGE_NORMS[vtype]
-            temp_stress = abs(temp - 15) / 55.0
-            deviation_range = norm["nom"] * 0.12 * temp_stress
-            deviation = _rnd.uniform(-deviation_range, deviation_range)
-            if "АВАРІЯ" in obj.get("status", ""):
-                deviation += norm["nom"] * _rnd.uniform(-0.15, -0.05)
-            elif "Попередження" in obj.get("status", ""):
-                deviation += norm["nom"] * _rnd.uniform(-0.08, 0.02)
-            return vtype, norm, round(vnom + deviation, 2)
+        crm_kpi(kc1, "👥", f"{total_consumers:,}".replace(",","ʼ"), "Всього споживачів")
+        crm_kpi(kc2, "✅", f"{avg_pay_pct}%", "Рівень оплати (поточний місяць)",
+                delta=f"{'↑' if avg_pay_pct >= 85 else '↓'} {'В нормі' if avg_pay_pct >= 85 else 'Нижче цілі 85%'}",
+                delta_color="#22c55e" if avg_pay_pct >= 85 else "#f87171")
+        crm_kpi(kc3, "💸", f"{total_debt/1_000_000:.1f} млн", "Загальна заборгованість, грн",
+                delta="⚠️ Потребує контролю", delta_color="#f59e0b")
+        crm_kpi(kc4, "⚡", f"{total_kwh/1_000_000:.1f} млн", "Споживання, кВт·год / міс")
+        crm_kpi(kc5, "🏦", f"{total_revenue} млн", "Нарахований дохід, грн",
+                delta=f"Тариф: {TARIFF_SINGLE} грн/кВт·год", delta_color="#60a5fa")
 
-        alert_rows = []
-        for obj in st.session_state.objects:
-            vtype, norm, actual = simulate_voltage(obj, temperature)
-            status_ok = norm["low"] <= actual <= norm["high"]
-            deviation_pct = round((actual - norm["nom"]) / norm["nom"] * 100, 1)
-            alert_rows.append({"obj": obj, "vtype": vtype, "norm": norm,
-                                "actual": actual, "status_ok": status_ok, "deviation_pct": deviation_pct})
+        st.markdown("<div style='margin-top:1.5rem'></div>", unsafe_allow_html=True)
 
-        n_crit = sum(1 for r in alert_rows if not r["status_ok"] and "АВАРІЯ" in r["obj"].get("status",""))
-        n_warn = sum(1 for r in alert_rows if not r["status_ok"] and "Попередження" in r["obj"].get("status",""))
-        n_volt = sum(1 for r in alert_rows if not r["status_ok"] and r["obj"].get("status","") == "Нормальна")
-        n_ok   = sum(1 for r in alert_rows if r["status_ok"] and r["obj"].get("status","") == "Нормальна")
+        # ── Три підвкладки ───────────────────────────────────────────────
+        crm_tab1, crm_tab2, crm_tab3 = st.tabs([
+            "📊 Дашборд оплат по дільницях",
+            "🗺️ Теплова карта заборгованостей",
+            "🧮 Тарифний калькулятор",
+        ])
 
-        ac1, ac2, ac3, ac4 = st.columns(4)
-        ac1.metric("🔴 Критичні аварії",   n_crit)
-        ac2.metric("🟠 Попередження",       n_warn)
-        ac3.metric("🟡 Аномалії напруги",   n_volt)
-        ac4.metric("🟢 Об'єктів у нормі",   n_ok)
+        # ─────────────────────────────────────────────────────────────────
+        # ПІДВКЛАДКА 1: Дашборд оплат
+        # ─────────────────────────────────────────────────────────────────
+        with crm_tab1:
+            st.markdown("### 📊 Рівень розрахунків по структурних одиницях")
 
-        anomaly_rows = [r for r in alert_rows
-                        if not r["status_ok"] or r["obj"].get("status","") in ("АВАРІЯ","Попередження")]
-        normal_rows  = [r for r in alert_rows
-                        if r["status_ok"] and r["obj"].get("status","") == "Нормальна"]
+            # Поточний місяць
+            pay_data = []
+            for d in CRM_DISTRICTS:
+                pct = round(d["consumers_paid"] / d["consumers_total"] * 100, 1)
+                paid_uah = round(d["consumption_kwh"] * TARIFF_SINGLE * pct / 100 / 1_000_000, 2)
+                pay_data.append({
+                    "Дільниця": d["name"],
+                    "СО": d["so"].replace("СО «","").replace(" ЕМ»",""),
+                    "Споживачів всього": d["consumers_total"],
+                    "Сплатили": d["consumers_paid"],
+                    "% оплати": pct,
+                    "Борг (млн грн)": round(d["debt_uah"]/1_000_000, 2),
+                    "Нарах. (млн грн)": round(d["consumption_kwh"] * TARIFF_SINGLE / 1_000_000, 2),
+                    "Сплачено (млн грн)": paid_uah,
+                })
+            pay_df = pd.DataFrame(pay_data)
 
-        if anomaly_rows:
-            st.markdown("#### ⚠️ Об'єкти поза межами норми:")
-            for row in anomaly_rows:
-                obj = row["obj"]
-                actual_v = row["actual"]
-                norm     = row["norm"]
-                dev      = row["deviation_pct"]
-                vtype    = row["vtype"]
-                obj_status = obj.get("status","Нормальна")
-
-                if "АВАРІЯ" in obj_status:
-                    border_color="#ef4444"; badge_bg="#7f1d1d"; badge_text="🔴 АВАРІЯ"; icon="🚨"
-                    rec = "Негайно направити ОВБ. Відключити пошкоджений вузол через SCADA. Перевірити живлення споживачів через резервне кільце."
-                elif "Попередження" in obj_status:
-                    border_color="#f59e0b"; badge_bg="#78350f"; badge_text="🟠 ПОПЕРЕДЖЕННЯ"; icon="⚠️"
-                    rec = "Призначити позапланову інспекцію. Перевірити ізоляцію та контактні з'єднання."
-                elif actual_v < norm["low"]:
-                    border_color="#facc15"; badge_bg="#713f12"; badge_text="🟡 АНОМАЛІЯ НАПРУГИ"; icon="⚡"
-                    rec = f"Напруга нижче норми ({actual_v} кВ < {norm['low']} кВ). Перевірити навантаження. Можливо потрібне секціонування."
-                else:
-                    border_color="#facc15"; badge_bg="#713f12"; badge_text="🟡 АНОМАЛІЯ НАПРУГИ"; icon="⚡"
-                    rec = f"Напруга вище норми ({actual_v} кВ > {norm['high']} кВ). Перевірити РПН трансформатора."
-
-                sign = "+" if dev >= 0 else ""
+            # Горизонтальний прогрес-бар для кожної дільниці
+            st.markdown("#### Рівень оплати по дільницях (поточний місяць)")
+            for _, row in pay_df.iterrows():
+                pct_val = row["% оплати"]
+                color = "#22c55e" if pct_val >= 88 else ("#f59e0b" if pct_val >= 75 else "#ef4444")
                 st.markdown(f"""
-                <div style="background:#1e293b;border-radius:10px;padding:0.9rem 1.2rem;
-                            margin-bottom:0.7rem;border:1px solid #334155;border-left:5px solid {border_color};">
-                  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
-                    <div>
-                      <span style="font-size:1.1rem;">{icon}</span>
-                      <b style="color:#f1f5f9;font-size:1rem;margin-left:6px;">{obj["name"]}</b>
-                      <span style="color:#64748b;font-size:0.82rem;margin-left:8px;">{vtype}</span>
-                    </div>
-                    <span style="background:{badge_bg};color:#fef2f2;border-radius:5px;padding:2px 10px;font-size:0.78rem;font-weight:600;">{badge_text}</span>
+                <div style="margin-bottom:0.5rem;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+                    <span style="color:#e2e8f0;font-size:0.85rem;font-weight:600;">{row['Дільниця']}</span>
+                    <span style="color:{color};font-weight:700;font-size:0.85rem;">{pct_val}%
+                      &nbsp;<span style="color:#475569;font-weight:400;font-size:0.75rem;">
+                        (борг: {row['Борг (млн грн)']} млн грн)
+                      </span>
+                    </span>
                   </div>
-                  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;margin-top:0.7rem;font-size:0.83rem;">
-                    <div style="background:#0f172a;border-radius:6px;padding:0.5rem 0.7rem;">
-                      <div style="color:#64748b;">Напруга факт.</div>
-                      <div style="color:{border_color};font-weight:700;font-size:1rem;">{actual_v} кВ</div>
-                    </div>
-                    <div style="background:#0f172a;border-radius:6px;padding:0.5rem 0.7rem;">
-                      <div style="color:#64748b;">Норма (min–max)</div>
-                      <div style="color:#94a3b8;font-weight:600;">{norm["low"]}–{norm["high"]} кВ</div>
-                    </div>
-                    <div style="background:#0f172a;border-radius:6px;padding:0.5rem 0.7rem;">
-                      <div style="color:#64748b;">Відхилення</div>
-                      <div style="color:{border_color};font-weight:700;">{sign}{dev}%</div>
-                    </div>
-                  </div>
-                  <div style="margin-top:0.6rem;font-size:0.82rem;color:#94a3b8;">
-                    <span style="color:#60a5fa;font-weight:600;">🤖 SmartGrid AI:</span> {rec}
-                  </div>
-                  <div style="margin-top:0.4rem;font-size:0.78rem;color:#475569;">
-                    📌 {obj.get("subdivision","—")} · {obj.get("desc","—")[:90]}
+                  <div style="background:#0f172a;border-radius:6px;height:10px;overflow:hidden;">
+                    <div style="background:{color};width:{pct_val}%;height:100%;border-radius:6px;"></div>
                   </div>
                 </div>
                 """, unsafe_allow_html=True)
-        else:
-            st.success("✅ SmartGrid AI: Усі об'єкти функціонують у межах норми.")
 
-        if normal_rows:
-            with st.expander(f"✅ Об'єкти в нормі ({len(normal_rows)} шт.) — розгорнути"):
-                for row in normal_rows:
-                    obj = row["obj"]
-                    sign = "+" if row["deviation_pct"] >= 0 else ""
-                    st.markdown(
-                        f"**✅ {obj['name']}** — {row['vtype']} | "
-                        f"Напруга: `{row['actual']} кВ` | "
-                        f"Норма: `{row['norm']['low']}–{row['norm']['high']} кВ` | "
-                        f"Відхилення: `{sign}{row['deviation_pct']}%`"
-                    )
+            st.markdown("---")
+            col_ch1, col_ch2 = st.columns(2)
 
-        # Гістограма напруги
-        st.markdown("#### 📊 Гістограма напруги об'єктів vs Норма")
-        fig2, ax = plt.subplots(figsize=(10, 3.5))
-        fig2.patch.set_facecolor("#0f172a")
-        ax.set_facecolor("#1e293b")
-        names2   = [r["obj"]["name"] for r in alert_rows]
-        actuals2 = [r["actual"] / r["norm"]["nom"] * 100 for r in alert_rows]
-        bar_colors = []
-        for r in alert_rows:
-            if "АВАРІЯ" in r["obj"].get("status",""):
-                bar_colors.append("#ef4444")
-            elif not r["status_ok"]:
-                bar_colors.append("#f59e0b")
-            else:
-                bar_colors.append("#22c55e")
-        bars2 = ax.bar(names2, actuals2, color=bar_colors, width=0.55, edgecolor="#0f172a")
-        ax.axhline(y=100, color="#60a5fa", linestyle="--", linewidth=1.5, label="Номінал (100%)")
-        ax.axhline(y=90,  color="#f59e0b", linestyle=":", linewidth=1, alpha=0.7, label="Нижня межа норми (~90%)")
-        ax.axhline(y=110, color="#f59e0b", linestyle=":", linewidth=1, alpha=0.7, label="Верхня межа норми (~110%)")
-        ax.bar_label(bars2, fmt="%.1f%%", color="#cbd5e1", fontsize=8, padding=3)
-        ax.set_ylabel("% від номіналу", color="#64748b", fontsize=8)
-        ax.set_title(f"Напруга об'єктів (% від номіналу) при {temperature}°C", color="#f1f5f9", fontsize=9)
-        ax.tick_params(colors="#94a3b8", labelsize=8)
-        ax.spines[:].set_color("#334155")
-        ax.legend(fontsize=7.5, facecolor="#1e293b", edgecolor="#334155", labelcolor="#cbd5e1")
-        ax.set_ylim(75, 125)
-        plt.tight_layout()
-        st.pyplot(fig2)
-        plt.close(fig2)
+            with col_ch1:
+                st.markdown("#### 📈 Динаміка рівня оплати (12 місяців)")
+                selected_districts = st.multiselect(
+                    "Оберіть дільниці:",
+                    options=[d["name"] for d in CRM_DISTRICTS],
+                    default=[CRM_DISTRICTS[0]["name"], CRM_DISTRICTS[3]["name"], CRM_DISTRICTS[4]["name"]],
+                    key="crm_district_select"
+                )
+                fig_dyn, ax_dyn = plt.subplots(figsize=(6.5, 3.8))
+                fig_dyn.patch.set_facecolor("#0f172a")
+                ax_dyn.set_facecolor("#1e293b")
+                palette = ["#38bdf8","#a855f7","#10b981","#f59e0b","#f87171","#34d399","#60a5fa","#fbbf24"]
+                for i, d in enumerate(CRM_DISTRICTS):
+                    if d["name"] in selected_districts:
+                        monthly = st.session_state.crm_monthly_pay[d["id"]]
+                        ax_dyn.plot(MONTHS_SHORT, monthly, marker="o", markersize=4,
+                                    linewidth=2, color=palette[i % len(palette)], label=d["name"][:18])
+                ax_dyn.axhline(y=85, color="#ef4444", linestyle="--", linewidth=1, alpha=0.7, label="Ціль 85%")
+                ax_dyn.set_ylim(50, 105)
+                ax_dyn.tick_params(colors="#94a3b8", labelsize=8)
+                ax_dyn.spines[:].set_color("#334155")
+                ax_dyn.set_ylabel("% оплати", color="#64748b", fontsize=8)
+                ax_dyn.legend(fontsize=7, facecolor="#1e293b", edgecolor="#334155", labelcolor="#cbd5e1", loc="lower left")
+                ax_dyn.grid(True, alpha=0.1, color="#334155")
+                plt.tight_layout()
+                st.pyplot(fig_dyn)
+                plt.close(fig_dyn)
 
-        # Підсумковий алерт
-        if overload_hours:
-            st.error(f"🚨 **SmartGrid AI попередження:** Прогнозується перевантаження мережі в години: **{', '.join(overload_hours)}**. "
-                     f"Рекомендується ввести обмеження навантаження або підключити резервні джерела живлення.")
-        elif underload_hours:
-            st.warning(f"⚠️ **SmartGrid AI:** Низьке навантаження в: **{', '.join(underload_hours)}**. Можливий аварійний режим.")
-        elif temperature <= -10 or temperature >= 32:
-            st.warning(f"⚠️ **SmartGrid AI:** Екстремальні погодні умови ({temperature}°C). "
-                       f"Рекомендується посилений моніторинг та підвищена готовність ОВБ.")
-        else:
-            st.success(f"✅ **SmartGrid AI:** Прогнозоване навантаження при {temperature}°C в межах норми. "
-                       f"Пікове навантаження: **{max(predicted_load)} МВт**.")
+            with col_ch2:
+                st.markdown("#### 💰 Структура боргу за категоріями споживачів")
+                debt_cats = {"Населення": 12.8, "ОСББ / ЖКГ": 7.4, "Підприємства": 9.1,
+                             "Бюджетні орг.": 3.2, "Агросектор": 4.7}
+                fig_pie2, ax_pie2 = plt.subplots(figsize=(5, 3.8))
+                fig_pie2.patch.set_facecolor("#0f172a")
+                ax_pie2.set_facecolor("#0f172a")
+                pie_colors = ["#3b82f6","#a855f7","#f59e0b","#10b981","#ef4444"]
+                wedges2, texts2, autotexts2 = ax_pie2.pie(
+                    list(debt_cats.values()), labels=list(debt_cats.keys()),
+                    colors=pie_colors, autopct="%1.1f%%", startangle=90,
+                    wedgeprops=dict(edgecolor="#0f172a", linewidth=2)
+                )
+                for t in texts2: t.set_color("#94a3b8"); t.set_fontsize(8)
+                for at in autotexts2: at.set_color("#f1f5f9"); at.set_fontsize(8)
+                ax_pie2.set_title("Борг за категоріями, млн грн", color="#f1f5f9", fontsize=9)
+                plt.tight_layout()
+                st.pyplot(fig_pie2)
+                plt.close(fig_pie2)
+
+            st.markdown("#### 📋 Таблиця розрахунків по дільницях")
+            st.dataframe(pay_df.style.background_gradient(subset=["% оплати"], cmap="RdYlGn", vmin=60, vmax=100),
+                         use_container_width=True, hide_index=True)
+
+            # Завантаження звіту
+            csv_crm = pay_df.to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Завантажити звіт оплат (.csv)", data=csv_crm,
+                               file_name="crm_payments_report.csv", mime="text/csv")
+
+        # ─────────────────────────────────────────────────────────────────
+        # ПІДВКЛАДКА 2: Теплова карта заборгованостей
+        # ─────────────────────────────────────────────────────────────────
+        with crm_tab2:
+            st.markdown("### 🗺️ Теплова карта заборгованостей по дільницях")
+
+            col_map_crm, col_debtors = st.columns([1.6, 1])
+
+            with col_map_crm:
+                st.markdown("#### Фолія-карта боргів (Folium)")
+                st.caption("Кольорове кодування: 🟢 < 2 млн грн | 🟡 2–4 млн грн | 🔴 > 4 млн грн")
+
+                if FOLIUM_AVAILABLE:
+                    debt_map = folium.Map(location=[49.0, 28.5], zoom_start=8, tiles="CartoDB dark_matter")
+
+                    for d in CRM_DISTRICTS:
+                        debt_m = d["debt_uah"] / 1_000_000
+                        pay_pct = round(d["consumers_paid"] / d["consumers_total"] * 100, 1)
+
+                        # Колір залежно від боргу
+                        if debt_m >= 4.0:
+                            fill_color = "#ef4444"; border_color = "#b91c1c"; level = "🔴 КРИТИЧНИЙ РІВЕНЬ"
+                        elif debt_m >= 2.0:
+                            fill_color = "#f59e0b"; border_color = "#d97706"; level = "🟡 ПІДВИЩЕНИЙ РІВЕНЬ"
+                        else:
+                            fill_color = "#22c55e"; border_color = "#16a34a"; level = "🟢 НОРМАЛЬНИЙ РІВЕНЬ"
+
+                        # Радіус кола пропорційний боргу
+                        radius_km = max(8, min(35, debt_m * 6))
+
+                        popup_html = f"""
+                        <div style="font-family:sans-serif;min-width:220px;padding:4px">
+                          <b style="font-size:13px">{d['name']}</b><br>
+                          <span style="color:#555;font-size:11px">{d['so']}</span>
+                          <hr style="margin:6px 0">
+                          <table style="width:100%;font-size:11px">
+                            <tr><td style="color:#666">Борг:</td><td><b style="color:#dc2626">{debt_m:.2f} млн грн</b></td></tr>
+                            <tr><td style="color:#666">Оплата:</td><td><b>{pay_pct}%</b></td></tr>
+                            <tr><td style="color:#666">Споживачів:</td><td>{d['consumers_total']:,}</td></tr>
+                            <tr><td style="color:#666">Споживання:</td><td>{d['consumption_kwh']/1_000_000:.1f} млн кВт·год</td></tr>
+                            <tr><td style="color:#666">Рівень:</td><td><b>{level}</b></td></tr>
+                          </table>
+                        </div>"""
+
+                        folium.Circle(
+                            location=[d["lat"], d["lon"]],
+                            radius=radius_km * 1000,
+                            color=border_color, fill=True,
+                            fill_color=fill_color, fill_opacity=0.35, weight=2,
+                            tooltip=folium.Tooltip(f"<b>{d['name']}</b><br>Борг: {debt_m:.2f} млн грн<br>Оплата: {pay_pct}%", sticky=True),
+                            popup=folium.Popup(popup_html, max_width=260)
+                        ).add_to(debt_map)
+
+                        # Маркер з підписом
+                        folium.Marker(
+                            location=[d["lat"], d["lon"]],
+                            tooltip=d["name"],
+                            icon=folium.DivIcon(
+                                html=f"""<div style="font-family:sans-serif;font-size:10px;font-weight:700;
+                                    color:white;text-shadow:1px 1px 2px black;white-space:nowrap;">
+                                    {d['name'][:14]}<br>
+                                    <span style="color:{'#fca5a5' if debt_m >= 4 else ('#fde68a' if debt_m >= 2 else '#86efac')}">
+                                    {debt_m:.1f} млн ₴</span></div>""",
+                                icon_size=(120, 35), icon_anchor=(0, 35)
+                            )
+                        ).add_to(debt_map)
+
+                    # Легенда
+                    legend_debt = """
+                    <div style="position:fixed;bottom:30px;left:30px;z-index:9999;background:#1e293b;
+                                color:#f1f5f9;padding:12px 16px;border-radius:8px;font-size:12px;
+                                border:1px solid #334155;">
+                      <b>Рівень заборгованості</b><br>
+                      <span style="color:#22c55e">●</span> &lt; 2 млн грн — норма<br>
+                      <span style="color:#f59e0b">●</span> 2–4 млн грн — підвищений<br>
+                      <span style="color:#ef4444">●</span> &gt; 4 млн грн — критичний<br>
+                      <i style="color:#64748b;font-size:10px">Розмір кола ∝ сумі боргу</i>
+                    </div>"""
+                    debt_map.get_root().html.add_child(folium.Element(legend_debt))
+                    st_folium(debt_map, width="100%", height=480, returned_objects=[])
+
+                else:
+                    st.warning("⚠️ Folium не встановлено. Встановіть: `pip install folium streamlit-folium`")
+                    st.markdown("**Альтернативна таблиця боргів:**")
+                    alt_df = pd.DataFrame([{
+                        "Дільниця": d["name"],
+                        "Борг (млн грн)": round(d["debt_uah"]/1_000_000, 2),
+                        "% оплати": round(d["consumers_paid"]/d["consumers_total"]*100, 1),
+                        "Рівень": "🔴 Критичний" if d["debt_uah"] >= 4_000_000 else ("🟡 Підвищений" if d["debt_uah"] >= 2_000_000 else "🟢 Норма")
+                    } for d in CRM_DISTRICTS])
+                    st.dataframe(alt_df, use_container_width=True, hide_index=True)
+
+                # Гістограма боргів
+                st.markdown("#### 📊 Порівняння боргів по дільницях")
+                fig_debt_bar, ax_db = plt.subplots(figsize=(8, 3.2))
+                fig_debt_bar.patch.set_facecolor("#0f172a")
+                ax_db.set_facecolor("#1e293b")
+                debt_vals = [d["debt_uah"]/1_000_000 for d in CRM_DISTRICTS]
+                dist_names = [d["name"][:16] for d in CRM_DISTRICTS]
+                bar_clrs = ["#ef4444" if v >= 4 else ("#f59e0b" if v >= 2 else "#22c55e") for v in debt_vals]
+                bars_db = ax_db.bar(dist_names, debt_vals, color=bar_clrs, width=0.6, edgecolor="#0f172a")
+                ax_db.bar_label(bars_db, fmt="%.1f", color="#e2e8f0", fontsize=8, padding=3, label_type="edge")
+                ax_db.axhline(y=4.0, color="#ef4444", linestyle="--", linewidth=1, alpha=0.7, label="Критичний поріг 4 млн")
+                ax_db.axhline(y=2.0, color="#f59e0b", linestyle="--", linewidth=1, alpha=0.7, label="Підвищений поріг 2 млн")
+                ax_db.set_ylabel("Борг, млн грн", color="#64748b", fontsize=8)
+                ax_db.tick_params(colors="#94a3b8", labelsize=7, axis="x", rotation=25)
+                ax_db.tick_params(colors="#94a3b8", labelsize=8, axis="y")
+                ax_db.spines[:].set_color("#334155")
+                ax_db.legend(fontsize=7.5, facecolor="#1e293b", edgecolor="#334155", labelcolor="#cbd5e1")
+                ax_db.grid(True, alpha=0.1, color="#334155", axis="y")
+                plt.tight_layout()
+                st.pyplot(fig_debt_bar)
+                plt.close(fig_debt_bar)
+
+            with col_debtors:
+                st.markdown("#### ⛔ Реєстр боржників")
+
+                # Фільтри
+                cat_filter = st.selectbox("Категорія:", ["Усі"] + DEBTOR_CATEGORIES, key="crm_cat_filter")
+                status_filter = st.selectbox("Статус:", ["Усі","⛔ Відключено","⚠️ Попередження","🟡 Нагадування"], key="crm_status_filter")
+
+                debtors_df = pd.DataFrame(st.session_state.crm_debtors)
+                if cat_filter != "Усі":
+                    debtors_df = debtors_df[debtors_df["Категорія"] == cat_filter]
+                if status_filter != "Усі":
+                    debtors_df = debtors_df[debtors_df["Статус"] == status_filter]
+                debtors_df = debtors_df.sort_values("Борг (грн)", ascending=False)
+
+                st.markdown(f"Знайдено: **{len(debtors_df)}** боржників")
+                st.dataframe(
+                    debtors_df[["Назва / ПІБ","Категорія","Борг (грн)","Місяців прострочення","Статус","Останній платіж"]],
+                    use_container_width=True, hide_index=True, height=350
+                )
+
+                # Додати платіж
+                st.markdown("#### ✏️ Зафіксувати платіж")
+                with st.form("payment_form"):
+                    debtor_names = [d["Назва / ПІБ"] for d in st.session_state.crm_debtors]
+                    sel_debtor = st.selectbox("Боржник:", debtor_names, key="pay_debtor")
+                    pay_amount = st.number_input("Сума платежу (грн):", min_value=0.0, value=5000.0, step=100.0)
+                    pay_submitted = st.form_submit_button("💳 Зафіксувати", use_container_width=True)
+                    if pay_submitted and pay_amount > 0:
+                        for d in st.session_state.crm_debtors:
+                            if d["Назва / ПІБ"] == sel_debtor:
+                                d["Борг (грн)"] = max(0.0, round(d["Борг (грн)"] - pay_amount, 2))
+                                d["Останній платіж"] = datetime.date.today().strftime("%d.%m.%Y")
+                                if d["Борг (грн)"] == 0:
+                                    d["Статус"] = "✅ Погашено"
+                                break
+                        st.success(f"✅ Платіж {pay_amount:,.0f} грн від «{sel_debtor}» зафіксовано!")
+                        st.rerun()
+
+        # ─────────────────────────────────────────────────────────────────
+        # ПІДВКЛАДКА 3: Тарифний калькулятор
+        # ─────────────────────────────────────────────────────────────────
+        with crm_tab3:
+            st.markdown("### 🧮 Тарифний калькулятор (Правила НЕК «Укренерго» 2026)")
+
+            st.markdown("""
+            <div style="background:#1e293b;border-radius:10px;padding:1rem 1.4rem;border:1px solid #334155;margin-bottom:1.2rem;">
+              <div style="color:#93c5fd;font-weight:700;font-size:0.9rem;margin-bottom:0.5rem;">💡 Діючі роздрібні тарифи на електроенергію (2026)</div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.8rem;font-size:0.85rem;">
+                <div style="background:#0f172a;border-radius:8px;padding:0.6rem 0.8rem;">
+                  <div style="color:#64748b;font-size:0.75rem;">⚡ Одноставковий</div>
+                  <div style="color:#38bdf8;font-weight:700;font-size:1.1rem;">{single} грн/кВт·год</div>
+                  <div style="color:#475569;font-size:0.72rem;">цілодобово</div>
+                </div>
+                <div style="background:#0f172a;border-radius:8px;padding:0.6rem 0.8rem;">
+                  <div style="color:#64748b;font-size:0.75rem;">🌞 Двозонний</div>
+                  <div style="color:#fbbf24;font-weight:700;">День: {day} грн</div>
+                  <div style="color:#60a5fa;font-weight:700;">Ніч: {night} грн</div>
+                  <div style="color:#475569;font-size:0.72rem;">07:00–23:00 / 23:00–07:00</div>
+                </div>
+                <div style="background:#0f172a;border-radius:8px;padding:0.6rem 0.8rem;">
+                  <div style="color:#64748b;font-size:0.75rem;">⚡🕐 Тризонний</div>
+                  <div style="color:#ef4444;font-weight:700;">Пік: {peak} грн</div>
+                  <div style="color:#fbbf24;font-weight:700;">Напівпік: {semi} грн</div>
+                  <div style="color:#60a5fa;font-weight:700;">Провал/Ніч: {valley} грн</div>
+                </div>
+              </div>
+            </div>
+            """.format(
+                single=TARIFF_SINGLE, day=TARIFF_DAY, night=TARIFF_NIGHT,
+                peak=TARIFF_PEAK, semi=TARIFF_SEMI, valley=TARIFF_VALLEY
+            ), unsafe_allow_html=True)
+
+            calc_col1, calc_col2 = st.columns([1, 1])
+
+            with calc_col1:
+                st.markdown("#### ⚙️ Введіть показники лічильника")
+
+                meter_type = st.radio(
+                    "Тип лічильника:",
+                    ["⚡ Одноставковий", "🌞 Двозонний", "⚡🕐 Тризонний"],
+                    horizontal=False, key="meter_type"
+                )
+
+                if meter_type == "⚡ Одноставковий":
+                    kwh_total = st.number_input("Споживання за місяць (кВт·год):", min_value=0.0, value=280.0, step=10.0)
+                    kwh_day = kwh_peak = kwh_semi = kwh_valley = kwh_night = 0.0
+
+                elif meter_type == "🌞 Двозонний":
+                    st.caption("Зони: День (07:00–23:00) та Ніч (23:00–07:00)")
+                    kwh_day   = st.number_input("День (кВт·год):", min_value=0.0, value=190.0, step=5.0, key="kwh_day_2z")
+                    kwh_night = st.number_input("Ніч (кВт·год):", min_value=0.0, value=90.0,  step=5.0, key="kwh_night_2z")
+                    kwh_total = kwh_day + kwh_night
+                    kwh_peak  = kwh_semi = kwh_valley = 0.0
+
+                else:  # Тризонний
+                    st.caption("Зони: Пік (08–11, 20–22), Напівпік (решта), Ніч/Провал (23–07)")
+                    kwh_peak   = st.number_input("Пік (кВт·год):",     min_value=0.0, value=60.0,  step=5.0, key="kwh_peak_3z")
+                    kwh_semi   = st.number_input("Напівпік (кВт·год):",min_value=0.0, value=150.0, step=5.0, key="kwh_semi_3z")
+                    kwh_valley = st.number_input("Ніч/Провал (кВт·год):",min_value=0.0, value=70.0, step=5.0, key="kwh_valley_3z")
+                    kwh_total  = kwh_peak + kwh_semi + kwh_valley
+                    kwh_day    = kwh_night = 0.0
+
+                payer_type = st.selectbox("Категорія споживача:", ["🏠 Населення","🏢 Юридична особа","🌾 Агросектор"])
+                prev_debt = st.number_input("Борг за попередній місяць (грн):", min_value=0.0, value=0.0, step=50.0)
+
+            with calc_col2:
+                st.markdown("#### 📄 Рахунок до оплати")
+
+                # Розрахунок
+                if meter_type == "⚡ Одноставковий":
+                    charge_energy = round(kwh_total * TARIFF_SINGLE, 2)
+                    breakdown = [("Споживання (одноставк.)", kwh_total, TARIFF_SINGLE, charge_energy)]
+                elif meter_type == "🌞 Двозонний":
+                    c_day   = round(kwh_day   * TARIFF_DAY,   2)
+                    c_night = round(kwh_night * TARIFF_NIGHT, 2)
+                    charge_energy = c_day + c_night
+                    breakdown = [("День (07–23)", kwh_day, TARIFF_DAY, c_day),
+                                 ("Ніч (23–07)", kwh_night, TARIFF_NIGHT, c_night)]
+                else:
+                    c_peak   = round(kwh_peak   * TARIFF_PEAK,   2)
+                    c_semi   = round(kwh_semi   * TARIFF_SEMI,   2)
+                    c_valley = round(kwh_valley * TARIFF_VALLEY, 2)
+                    charge_energy = c_peak + c_semi + c_valley
+                    breakdown = [("Пік (08–11, 20–22)", kwh_peak, TARIFF_PEAK, c_peak),
+                                 ("Напівпік",           kwh_semi, TARIFF_SEMI, c_semi),
+                                 ("Ніч/Провал (23–07)", kwh_valley, TARIFF_VALLEY, c_valley)]
+
+                # ПДВ 20%
+                pdv = round(charge_energy * 0.20, 2)
+                total_with_pdv = round(charge_energy + pdv, 2)
+                total_payable  = round(total_with_pdv + prev_debt, 2)
+
+                st.markdown(f"""
+                <div style="background:#1e293b;border-radius:12px;padding:1.2rem 1.4rem;border:1px solid #334155;">
+                  <div style="color:#93c5fd;font-size:0.8rem;font-weight:600;letter-spacing:2px;text-transform:uppercase;margin-bottom:0.8rem;">
+                    🧾 РОЗРАХУНОК — {datetime.date.today().strftime("%B %Y")}
+                  </div>
+                  <table style="width:100%;font-size:0.85rem;border-collapse:collapse;color:#cbd5e1;">
+                    <tr style="border-bottom:1px solid #334155;">
+                      <th style="text-align:left;padding:4px 0;color:#64748b;">Зона</th>
+                      <th style="text-align:right;color:#64748b;">кВт·год</th>
+                      <th style="text-align:right;color:#64748b;">Тариф</th>
+                      <th style="text-align:right;color:#64748b;">Сума</th>
+                    </tr>
+                    {"".join(f'<tr><td style="padding:4px 0">{b[0]}</td><td style="text-align:right">{b[1]:.1f}</td><td style="text-align:right">{b[2]}</td><td style="text-align:right;color:#38bdf8">{b[3]:.2f} грн</td></tr>' for b in breakdown)}
+                    <tr style="border-top:1px solid #334155;">
+                      <td colspan="3" style="padding:4px 0;color:#94a3b8;">Разом за енергію:</td>
+                      <td style="text-align:right;color:#38bdf8;font-weight:700;">{charge_energy:.2f} грн</td>
+                    </tr>
+                    <tr>
+                      <td colspan="3" style="padding:4px 0;color:#94a3b8;">ПДВ (20%):</td>
+                      <td style="text-align:right;color:#94a3b8;">{pdv:.2f} грн</td>
+                    </tr>
+                    <tr>
+                      <td colspan="3" style="padding:4px 0;color:#94a3b8;">Всього з ПДВ:</td>
+                      <td style="text-align:right;color:#f1f5f9;font-weight:600;">{total_with_pdv:.2f} грн</td>
+                    </tr>
+                    {"<tr><td colspan='3' style='padding:4px 0;color:#f59e0b;'>Борг попереднього місяця:</td><td style='text-align:right;color:#f59e0b;'>" + f"{prev_debt:.2f} грн</td></tr>" if prev_debt > 0 else ""}
+                  </table>
+                  <div style="margin-top:1rem;background:#0f172a;border-radius:8px;padding:0.8rem 1rem;
+                              display:flex;justify-content:space-between;align-items:center;">
+                    <span style="color:#94a3b8;font-size:0.9rem;font-weight:600;">💳 ДО ОПЛАТИ:</span>
+                    <span style="color:#22c55e;font-size:1.5rem;font-weight:800;">{total_payable:.2f} грн</span>
+                  </div>
+                  <div style="margin-top:0.5rem;font-size:0.75rem;color:#475569;">
+                    {payer_type} · Тип: {meter_type} · Спожито: {kwh_total:.1f} кВт·год
+                  </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Порівняльна діаграма тарифних сценаріїв
+                st.markdown("<div style='margin-top:1rem'></div>", unsafe_allow_html=True)
+                if kwh_total > 0:
+                    st.markdown("##### 📊 Порівняння вартості за типами лічильника")
+                    # Оцінюємо однакове споживання для всіх 3 тарифів (розподіл 68/32 і 23/55/22)
+                    c_single = round(kwh_total * TARIFF_SINGLE, 2)
+                    c_double = round(kwh_total * 0.68 * TARIFF_DAY + kwh_total * 0.32 * TARIFF_NIGHT, 2)
+                    c_triple = round(kwh_total * 0.23 * TARIFF_PEAK + kwh_total * 0.55 * TARIFF_SEMI + kwh_total * 0.22 * TARIFF_VALLEY, 2)
+
+                    fig_comp, ax_comp = plt.subplots(figsize=(5, 2.8))
+                    fig_comp.patch.set_facecolor("#0f172a")
+                    ax_comp.set_facecolor("#1e293b")
+                    labels_c = ["Одноставк.", "Двозонний", "Тризонний"]
+                    vals_c   = [c_single, c_double, c_triple]
+                    clrs_c   = ["#3b82f6","#f59e0b","#a855f7"]
+                    bars_c   = ax_comp.bar(labels_c, vals_c, color=clrs_c, width=0.5, edgecolor="#0f172a")
+                    ax_comp.bar_label(bars_c, fmt="%.0f грн", color="#f1f5f9", fontsize=9, padding=3)
+                    ax_comp.set_ylabel("Вартість (грн)", color="#64748b", fontsize=8)
+                    ax_comp.tick_params(colors="#94a3b8", labelsize=9)
+                    ax_comp.spines[:].set_color("#334155")
+                    ax_comp.grid(True, alpha=0.1, color="#334155", axis="y")
+                    best = labels_c[vals_c.index(min(vals_c))]
+                    ax_comp.set_title(f"Найвигідніший тариф: {best}", color="#22c55e", fontsize=9)
+                    plt.tight_layout()
+                    st.pyplot(fig_comp)
+                    plt.close(fig_comp)
+
+                    savings = round(max(vals_c) - min(vals_c), 2)
+                    if savings > 0:
+                        st.info(f"💡 Потенційна економія при переході на оптимальний тариф: **{savings:.2f} грн/міс** ({savings*12:.0f} грн/рік)")
+
+        # Нижній рядок — кнопки дій
+        st.markdown("---")
+        act1, act2, act3 = st.columns(3)
+        with act1:
+            crm_csv = pd.DataFrame([{
+                "Дільниця": d["name"], "Споживачів": d["consumers_total"],
+                "Сплатили": d["consumers_paid"], "Борг грн": d["debt_uah"],
+                "Споживання кВт·год": d["consumption_kwh"]
+            } for d in CRM_DISTRICTS]).to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Повний CRM-звіт (.csv)", data=crm_csv,
+                               file_name="crm_full_report.csv", mime="text/csv", use_container_width=True)
+        with act2:
+            debtors_csv = pd.DataFrame(st.session_state.crm_debtors).to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Реєстр боржників (.csv)", data=debtors_csv,
+                               file_name="crm_debtors.csv", mime="text/csv", use_container_width=True)
+        with act3:
+            if st.button("🔄 Оновити дані CRM", use_container_width=True):
+                st.toast("✅ Дані CRM оновлено з бази!")
+                st.rerun()
 
 # ==========================================
 # ВКЛАДКА: ЖУРНАЛ ПОДІЙ
@@ -1286,9 +1425,9 @@ if "log" in tab_map:
         st.title("📋 Цифровий журнал подій диспетчера")
         df = pd.DataFrame(st.session_state.log_data)
         col_f1, col_f2, col_f3 = st.columns(3)
-        with col_f1: search_query = st.text_input("🔍 Швидкий фільтр за назвою об'єкта", "")
+        with col_f1: search_query = st.text_input("🔍 Фільтр за об'єктом", "")
         with col_f2: type_filter = st.selectbox("Тип події", ["Усі типи","Аварія","Планове ТО","Ремонт","Інспекція"])
-        with col_f3: crit_filter = st.selectbox("Ступінь критичності", ["Усі рівні","Критична","Висока","Середня","Низька"])
+        with col_f3: crit_filter = st.selectbox("Критичність", ["Усі рівні","Критична","Висока","Середня","Низька"])
         if type_filter != "Усі типи": df = df[df["Тип"] == type_filter]
         if crit_filter != "Усі рівні" and "Критичність" in df.columns: df = df[df["Критичність"] == crit_filter]
         if search_query: df = df[df["Об'єкт"].str.contains(search_query, case=False)]
@@ -1300,23 +1439,20 @@ if "log" in tab_map:
 if "schedule" in tab_map:
     with tab_map["schedule"]:
         st.title("📅 Графік планового технічного обслуговування")
-        st.subheader("➕ Додати нове завдання до плану:")
+        st.subheader("➕ Додати нове завдання:")
         col_in1, col_in2, col_in3 = st.columns(3)
-        with col_in1: plan_obj = st.selectbox("Вузол для ТО:", [o["name"] for o in st.session_state.objects])
+        with col_in1: plan_obj = st.selectbox("Вузол:", [o["name"] for o in st.session_state.objects])
         with col_in2: plan_date = st.date_input("Дата робіт", datetime.date.today() + datetime.timedelta(days=1))
-        with col_in3: plan_desc = st.text_input("Опис регламентних робіт:", placeholder="Введіть опис робіт...")
-        if st.button("➕ Додати до графіка робіт", use_container_width=True):
+        with col_in3: plan_desc = st.text_input("Опис робіт:", placeholder="Введіть опис...")
+        if st.button("➕ Додати до графіка", use_container_width=True):
             if plan_desc:
-                st.session_state.schedule_data.append({
-                    "Дата": str(plan_date), "Об'єкт": plan_obj,
-                    "Вид робіт": plan_desc, "Статус": "Заплановано"
-                })
-                st.success(f"✅ Роботи по {plan_obj} успішно додано!")
+                st.session_state.schedule_data.append({"Дата": str(plan_date), "Об'єкт": plan_obj, "Вид робіт": plan_desc, "Статус": "Заплановано"})
+                st.success(f"✅ Роботи по {plan_obj} додано!")
                 st.rerun()
             else:
-                st.error("Будь ласка, вкажіть вид робіт.")
+                st.error("Вкажіть вид робіт.")
         st.divider()
-        st.subheader("📋 Поточний графік робіт:")
+        st.subheader("📋 Поточний графік:")
         st.table(pd.DataFrame(st.session_state.schedule_data))
 
 # ==========================================
@@ -1324,26 +1460,23 @@ if "schedule" in tab_map:
 # ==========================================
 if "data" in tab_map:
     with tab_map["data"]:
-        st.title("💾 Data-Центр синхронізації та обміну (Імпорт/Експорт)")
+        st.title("💾 Data-Центр синхронізації та обміну")
         curr_df = pd.DataFrame(st.session_state.log_data)
         exp_col, imp_col = st.columns(2)
         with exp_col:
-            st.subheader("📤 Експорт даних із системи")
+            st.subheader("📤 Експорт")
             csv_data = curr_df.to_csv(index=False).encode('utf-8')
-            st.download_button(label="📥 Скачати Excel CSV (.csv)", data=csv_data,
-                               file_name="vinnitsaoblenergo_export.csv", mime="text/csv", use_container_width=True)
+            st.download_button("📥 Скачати CSV", data=csv_data, file_name="voe_export.csv", mime="text/csv", use_container_width=True)
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 curr_df.to_excel(writer, index=False, sheet_name='Журнал Подій')
-            st.download_button(label="📥 Скачати книгу MS Excel (.xlsx)", data=buffer.getvalue(),
-                               file_name="vinnitsaoblenergo_export.xlsx",
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                               use_container_width=True)
+            st.download_button("📥 Скачати Excel", data=buffer.getvalue(), file_name="voe_export.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with imp_col:
-            st.subheader("📥 Імпорт зовнішніх даних")
-            uploaded_file = st.file_uploader("Оберіть файл конфігурації мережі", type=["csv","xlsx","json"])
+            st.subheader("📥 Імпорт")
+            uploaded_file = st.file_uploader("Файл конфігурації:", type=["csv","xlsx","json"])
             if uploaded_file is not None:
-                st.success("✅ Структуру файлу успішно розпізнано! Дані готові до інтеграції.")
+                st.success("✅ Файл розпізнано! Дані готові до інтеграції.")
 
 # ==========================================
 # ВКЛАДКА: УПРАВЛІННЯ ДОСТУПОМ (тільки Адмін)
@@ -1352,15 +1485,13 @@ if "users" in tab_map:
     with tab_map["users"]:
         st.title("👥 Управління правами доступу користувачів")
         st.info("ℹ️ Ця вкладка доступна виключно адміністраторам системи.")
-        st.subheader("📋 Поточні облікові записи системи")
+        st.subheader("📋 Облікові записи системи")
         users_display = []
         for login, data in USERS_DB.items():
             users_display.append({
                 "Логін": login, "Ім'я та посада": data["display_name"],
                 "Підрозділ": data["subdivision"], "Роль": ROLE_LABELS.get(data["role"], data["role"]),
-                "Доступні вкладки": ", ".join(
-                    t[0] for t in TAB_DEFINITIONS[ROLE_TO_TAB_SET.get(data["role"],"brigade_tabs")]
-                )
+                "Доступні вкладки": ", ".join(t[0] for t in TAB_DEFINITIONS[ROLE_TO_TAB_SET.get(data["role"],"brigade_tabs")])
             })
         st.dataframe(pd.DataFrame(users_display), use_container_width=True, hide_index=True)
         st.divider()
