@@ -189,6 +189,26 @@ if "selected_object" not in st.session_state:
 if "task_closed" not in st.session_state:
     st.session_state.task_closed = False
 
+if "meter_readings" not in st.session_state:
+    st.session_state.meter_readings = {
+        "prev_day": 190.0, "prev_night": 90.0,
+        "last_update": "20.05.2026"
+    }
+
+def submit_meter_reading(new_day, new_night):
+    prev_d = st.session_state.meter_readings["prev_day"]
+    prev_n = st.session_state.meter_readings["prev_night"]
+    
+    if new_day < prev_d or new_night < prev_n:
+        return False, "Поточні покази менші за попередні!"
+    
+    st.session_state.meter_readings.update({
+        "prev_day": new_day,
+        "prev_night": new_night,
+        "last_update": datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
+    })
+    return True, "✅ Покази успішно передані до білінгової системи!"
+
 # ==========================================
 # CRM — ІНІЦІАЛІЗАЦІЯ ДАНИХ
 # ==========================================
@@ -830,6 +850,29 @@ if "mobile" in tab_map:
                     st.session_state.task_closed = True
                     st.rerun()
         st.markdown("---")
+
+with st.container(border=True):
+    st.markdown("### ⚡ Передача показів лічильника")
+    col1, col2 = st.columns(2)
+    new_d = col1.number_input("День (кВт·год):", min_value=0.0, value=st.session_state.meter_readings["prev_day"])
+    new_n = col2.number_input("Ніч (кВт·год):", min_value=0.0, value=st.session_state.meter_readings["prev_night"])
+    
+    if st.button("📤 Надіслати в білінг"):
+        success, msg = submit_meter_reading(new_d, new_n)
+        if success:
+            st.success(msg)
+            # Додаємо в журнал подій автоматично
+            st.session_state.log_data.insert(0, {
+                "Час": datetime.datetime.now().strftime("%d.%m %H:%M"),
+                "Тип": "CRM",
+                "Об'єкт": "Лічильник споживача",
+                "Опис": f"Передано покази: День={new_d}, Ніч={new_n}",
+                "Критичність": "Низька"
+            })
+        else:
+            st.error(msg)
+    
+    st.caption(f"Останнє оновлення: {st.session_state.meter_readings['last_update']}")
 
 # ==========================================
 # ВКЛАДКА: СТРУКТУРА КОМПАНІЇ
