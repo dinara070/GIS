@@ -1456,6 +1456,77 @@ if "schedule" in tab_map:
         st.table(pd.DataFrame(st.session_state.schedule_data))
 
 # ==========================================
+# 📊 ВКЛАДКА: ЦЕНТР ЕНЕРГОЕФЕКТИВНОСТІ
+# ==========================================
+if "efficiency" in tab_map:
+    with tab_map["efficiency"]:
+        st.title("📊 Центр енергоефективності та втрат")
+        
+        # Імітація даних втрат по дільницях
+        loss_data = pd.DataFrame({
+            "Дільниця": ["Вінницька", "Шаргородська", "Тиврівська", "Літинська"],
+            "Відпущено (МВт·год)": [1200, 850, 950, 700],
+            "Спожито (МВт·год)": [1150, 760, 910, 680]
+        })
+        loss_data["Технічні втрати (%)"] = ((loss_data["Відпущено (МВт·год)"] - loss_data["Спожито (МВт·год)"]) / loss_data["Відпущено (МВт·год)"] * 100).round(2)
+        
+        st.dataframe(loss_data.style.background_gradient(subset=["Технічні втрати (%)"], cmap="Reds"), use_container_width=True)
+        
+        st.info("💡 Адміністративна порада: на Шаргородській дільниці рівень втрат перевищує 10%. Рекомендується перевірка на предмет несанкціонованого втручання.")
+
+# ==========================================
+# 🛠️ ВКЛАДКА: СКЛАДСЬКИЙ ОБЛІК ЗАПЧАСТИН
+# ==========================================
+if "warehouse" in tab_map:
+    with tab_map["warehouse"]:
+        st.title("🛠️ Складський облік запчастин")
+        
+        if "stock" not in st.session_state:
+            st.session_state.stock = pd.DataFrame({
+                "Найменування": ["Ізолятор ШФ-20", "Кабель АВВГ 4х16", "Трансформатор ТМ-100", "Опора СВ-95"],
+                "На складі": [150, 500, 3, 20],
+                "Критичний мінімум": [50, 100, 1, 5]
+            })
+            
+        st.dataframe(st.session_state.stock, use_container_width=True)
+        
+        # Форма для списання (наприклад, після закриття наряду)
+        with st.expander("📝 Списати обладнання за нарядом"):
+            item = st.selectbox("Оберіть запчастину:", st.session_state.stock["Найменування"])
+            qty = st.number_input("Кількість:", min_value=1, value=1)
+            if st.button("Списати зі складу"):
+                idx = st.session_state.stock[st.session_state.stock["Найменування"] == item].index[0]
+                st.session_state.stock.at[idx, "На складі"] -= qty
+                st.success(f"Списано {qty} од. {item}")
+                st.rerun()
+
+# ==========================================
+# 📡 ВКЛАДКА: МОНІТОРИНГ IOT-ДАТЧИКІВ
+# ==========================================
+if "iot" in tab_map:
+    with tab_map["iot"]:
+        st.title("📡 Моніторинг IoT-датчиків (Real-time)")
+        
+        # Імітація даних датчика
+        tp_select = st.selectbox("Оберіть ТП для перегляду:", ["ТП-245", "ТП-12", "ТП-Шаргород-100"])
+        
+        col1, col2 = st.columns(2)
+        # Генерація графіку останніх 24 годин
+        time_data = [datetime.datetime.now() - datetime.timedelta(hours=i) for i in range(24)][::-1]
+        voltage_vals = [10.0 + _rnd.uniform(-0.5, 0.5) for _ in range(24)]
+        
+        with col1:
+            st.metric("Поточна напруга", f"{voltage_vals[-1]:.2f} кВ", delta="-0.02 кВ")
+            fig, ax = plt.subplots(figsize=(10, 3))
+            ax.plot(time_data, voltage_vals, color="#38bdf8")
+            ax.set_title("Напруга за останні 24 години")
+            st.pyplot(fig)
+            
+        with col2:
+            st.metric("Поточна температура", f"{25 + _rnd.randint(-5, 10)} °C")
+            st.progress(0.75, text="Завантаження трансформатора")
+
+# ==========================================
 # ВКЛАДКА: DATA ЦЕНТР (тільки Адмін)
 # ==========================================
 if "data" in tab_map:
