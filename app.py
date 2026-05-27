@@ -189,6 +189,19 @@ if "selected_object" not in st.session_state:
 if "task_closed" not in st.session_state:
     st.session_state.task_closed = False
 
+if "warehouse_data" not in st.session_state:
+    st.session_state.warehouse_data = pd.DataFrame({
+        "Обладнання": ["Ізолятор ШФ-20", "Кабель АВВГ 4х16", "Трансформатор ТМ-100", "Опора СВ-95"],
+        "Кількість": [150, 450, 2, 12],
+        "Дільниця": ["Вінницька", "Шаргородська", "Тиврівська", "Вінницька"]
+    })
+
+if "iot_sensors" not in st.session_state:
+    st.session_state.iot_sensors = {
+        "ТП-245": {"Voltage": 10.2, "Temp": 45, "Load": 88},
+        "ТП-12": {"Voltage": 10.5, "Temp": 32, "Load": 65}
+    }
+
 # ==========================================
 # CRM — ІНІЦІАЛІЗАЦІЯ ДАНИХ
 # ==========================================
@@ -271,13 +284,14 @@ TAB_DEFINITIONS = {
         ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"), ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
+        ("📉 Енергоефективність", "efficiency"), ("📦 Склад", "warehouse"), ("📡 IoT", "iot"),
     ],
     "admin_tabs": [
         ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"), ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
-        ("💰 CRM та Білінг", "crm"),
-        ("💾 Data Центр", "data"), ("👥 Управління доступом", "users"),
+        ("📉 Енергоефективність", "efficiency"), ("📦 Склад", "warehouse"), ("📡 IoT", "iot"),
+        ("💰 CRM та Білінг", "crm"), ("💾 Data Центр", "data"), ("👥 Управління доступом", "users"),
     ],
     "crm_tabs": [
         ("🏠 Головна", "home"),
