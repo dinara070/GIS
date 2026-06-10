@@ -22,6 +22,17 @@ st.set_page_config(
 
 plt.style.use('dark_background')
 
+def render_metric_card(col, icon, value, label, subtext, color="#38bdf8"):
+    col.markdown(f"""
+    <div style="background:#1e293b; border-radius:12px; padding:1.5rem; border:1px solid #334155; 
+                text-align:center; transition: 0.3s;">
+        <div style="font-size:2rem; margin-bottom:0.5rem;">{icon}</div>
+        <div style="color:{color}; font-size:1.8rem; font-weight:800;">{value}</div>
+        <div style="color:#f1f5f9; font-weight:600; font-size:0.9rem; margin-top:5px;">{label}</div>
+        <div style="color:#64748b; font-size:0.75rem; margin-top:3px;">{subtext}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
 # ==========================================
 # СИСТЕМА АВТОРИЗАЦІЇ
 # ==========================================
@@ -298,6 +309,40 @@ tab_labels = [t[0] for t in active_tabs]
 tab_keys   = [t[1] for t in active_tabs]
 rendered_tabs = st.tabs(tab_labels)
 tab_map = dict(zip(tab_keys, rendered_tabs))
+
+if "home" in tab_map:
+    with tab_map["home"]:
+        st.markdown("""
+            <style>
+            .main-title { font-size: 2.5rem; color: #f8fafc; margin-bottom: 0.5rem; }
+            .sub-title { color: #94a3b8; font-size: 1.1rem; margin-bottom: 2rem; }
+            </style>
+            <h1 class="main-title">Система управління мережами</h1>
+            <p class="sub-title">Оперативний моніторинг енергосистеми Вінницької області v6.0</p>
+        """, unsafe_allow_html=True)
+        
+        # Використовуємо покращені картки
+        c1, c2, c3, c4 = st.columns(4)
+        render_metric_card(c1, "🚨", "1", "Активні аварії", "Критичний пріоритет", "#ef4444")
+        render_metric_card(c2, "⚡", "148.5 МВт", "Навантаження", "Поточний стан", "#a855f7")
+        render_metric_card(c3, "👥", "124,500", "Споживачів", "Всього в системі", "#34d399")
+        render_metric_card(c4, "📅", "3", "ТО на сьогодні", "Регламентні роботи", "#f59e0b")
+
+        st.divider()
+        
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            st.subheader("🛠️ Швидкий доступ")
+            b1, b2 = st.columns(2)
+            if b1.button("🗺️ Відкрити карту мережі", use_container_width=True):
+                # Оскільки у вас односторінковий додаток, змініть активну вкладку через session_state
+                # або просто залиште як посилання на функціонал
+                pass 
+            b2.button("📋 Журнал подій", use_container_width=True)
+        
+        with col2:
+            st.subheader("📢 Останні сповіщення")
+            st.info("Черговий диспетчер: Всі підстанції працюють в штатному режимі, крім ТП-245.")
 
 # ==========================================
 # ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ FOLIUM ГІС
