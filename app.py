@@ -1422,16 +1422,65 @@ if "crm" in tab_map:
 # ==========================================
 if "log" in tab_map:
     with tab_map["log"]:
-        st.title("📋 Цифровий журнал подій диспетчера")
+        st.title("📋 Журнал оперативних подій")
+        st.markdown("""
+        Централізований реєстр всіх комутаційних операцій, аварійних відключень та планових робіт.
+        Використовуйте фільтри нижче для швидкого пошуку конкретних інцидентів.
+        """)
+        
+        # Створення DataFrame
         df = pd.DataFrame(st.session_state.log_data)
-        col_f1, col_f2, col_f3 = st.columns(3)
-        with col_f1: search_query = st.text_input("🔍 Фільтр за об'єктом", "")
-        with col_f2: type_filter = st.selectbox("Тип події", ["Усі типи","Аварія","Планове ТО","Ремонт","Інспекція"])
-        with col_f3: crit_filter = st.selectbox("Критичність", ["Усі рівні","Критична","Висока","Середня","Низька"])
-        if type_filter != "Усі типи": df = df[df["Тип"] == type_filter]
-        if crit_filter != "Усі рівні" and "Критичність" in df.columns: df = df[df["Критичність"] == crit_filter]
-        if search_query: df = df[df["Об'єкт"].str.contains(search_query, case=False)]
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        
+        # --- Блок фільтрів ---
+        with st.container(border=True):
+            st.markdown("#### ⚙️ Панель фільтрації")
+            f1, f2, f3, f4 = st.columns([2, 1.5, 1.5, 1])
+            
+            search_query = f1.text_input("🔍 Пошук за об'єктом:", placeholder="Наприклад: ТП-245...")
+            type_filter = f2.selectbox("Тип події:", ["Усі типи", "Аварія", "Планове ТО", "Ремонт", "Інспекція"])
+            crit_filter = f3.selectbox("Критичність:", ["Усі рівні", "Критична", "Висока", "Середня", "Низька"])
+            
+            # Логіка фільтрації
+            if type_filter != "Усі типи": df = df[df["Тип"] == type_filter]
+            if crit_filter != "Усі рівні": df = df[df["Критичність"] == crit_filter]
+            if search_query: df = df[df["Об'єкт"].str.contains(search_query, case=False)]
+        
+        # --- Статистика по журналу ---
+        c_stat1, c_stat2, c_stat3 = st.columns(3)
+        c_stat1.metric("Всього записів", len(df))
+        c_stat2.metric("Активних аварій", len(df[df["Тип"] == "Аварія"]))
+        c_stat3.metric("Рівень вибірки", f"{int((len(df) / len(st.session_state.log_data)) * 100)}%")
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # --- Таблиця журналу з умовним форматуванням ---
+        def color_criticality(val):
+            color = "#ef4444" if val == "Критична" else ("#f59e0b" if val == "Висока" else "#22c55e")
+            return f'color: {color}; font-weight: bold'
+
+        st.dataframe(
+            df.style.map(color_criticality, subset=["Критичність"]),
+            use_container_width=True, 
+            hide_index=True,
+            column_config={
+                "Час": st.column_config.TextColumn("Час фіксації"),
+                "Об'єкт": st.column_config.TextColumn("Об'єкт мережі"),
+                "Опис": st.column_config.TextColumn("Деталі події", width="large")
+            }
+        )
+        
+        # --- Блок дій ---
+        col_act1, col_act2 = st.columns([1, 4])
+        if col_act1.button("🔄 Оновити дані", use_container_width=True):
+            st.rerun()
+            
+        with st.expander("ℹ️ Інструкція з роботи з журналом"):
+            st.markdown("""
+            * **Оперативність:** Журнал оновлюється в реальному часі.
+            * **Критичність:** Записи з червоним маркером потребують негайного реагування (диспетчерська команда).
+            * **Експорт:** Ви можете завантажити повний звіт у вкладці «Data Центр».
+            * **Доступ:** Будь-які зміни в статусах об'єктів реєструються під логіном користувача, який виконав дію.
+            """)
 
 # ==========================================
 # ВКЛАДКА: ПЛАНУВАННЯ ТО
