@@ -873,70 +873,65 @@ if "structure" in tab_map:
 # ==========================================
 if "analytics" in tab_map:
     with tab_map["analytics"]:
-        st.title("📊 SmartGrid AI — Оперативна аналітика")
-        st.markdown("Моніторинг ключових показників ефективності (KPI) енергосистеми та прогнозування навантаження.")
-        
-        # --- Блок KPI з трендами ---
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("SAIDI", "42.5 хв", "-3.2 хв", delta_color="inverse")
-        k2.metric("SAIFI", "1.14 од.", "+0.02", delta_color="inverse")
-        k3.metric("Потужність", "148.5 МВт", "Норма")
-        k4.metric("Ефективність КВВ", "94.2%", "+0.5%")
-        
-        st.divider()
-
-        # --- Аналіз навантаження ---
-        st.subheader("🌡️ SmartGrid AI — Прогнозування та навантаження")
-        
-        col_ctrl, col_info = st.columns([1.5, 1])
+        st.title("📊 SmartGrid AI — Інтелектуальна аналітика мережі")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Індекс надійності SAIDI", "42.5 хв/рік", "-3.2 хв від плану", delta_color="inverse")
+        m2.metric("Індекс частоти вимкнень SAIFI", "1.14 од/рік", "+0.02", delta_color="inverse")
+        m3.metric("Загальна потужність", "148.5 МВт", "Норма")
+        m4.metric("КВВ", "94.2%", "+0.5%")
+        st.markdown("---")
+        st.markdown("### 🌡️ SmartGrid AI — Симуляція навантаження")
+        col_ctrl, col_info = st.columns([2, 1])
         with col_ctrl:
-            temperature = st.slider("🌡️ Моделювання температури (°C):", min_value=-20, max_value=40, value=15)
-            st.markdown("""
-            Цей інструмент дозволяє прогнозувати споживання енергії залежно від погодних умов. 
-            Модель враховує коефіцієнт нагріву/охолодження мереж при екстремальних температурах.
-            """)
-        
+            temperature = st.slider("🌡️ Температура (°C)", min_value=-20, max_value=40, value=15, step=1)
         with col_info:
-            # Логіка визначення сезону
-            if temperature < 0: status, color = "❄️ Зимовий режим", "#60a5fa"
-            elif temperature < 20: status, color = "🌿 Перехідний режим", "#34d399"
-            else: status, color = "🔥 Літній режим (Пікове охолодження)", "#f87171"
-            
-            st.markdown(f"""
-            <div style="background:#1e293b; padding:1rem; border-radius:10px; border-left: 5px solid {color};">
-                <strong>Поточний статус моделі:</strong><br>
-                <span style="font-size: 1.2rem;">{status}</span>
-            </div>
-            """, unsafe_allow_html=True)
-
-        # --- Візуалізація ---
+            if temperature <= -10: season_label, season_color = "❄️ Сильні морози", "#60a5fa"
+            elif temperature <= 0: season_label, season_color = "🌨️ Зима", "#93c5fd"
+            elif temperature <= 10: season_label, season_color = "🌤️ Прохолодна погода", "#6ee7b7"
+            elif temperature <= 20: season_label, season_color = "🌿 Весна / Осінь", "#34d399"
+            elif temperature <= 30: season_label, season_color = "☀️ Тепло", "#fbbf24"
+            else: season_label, season_color = "🔥 Спека", "#f87171"
+            st.markdown(f"""<div style="background:#1e293b;border-radius:10px;padding:0.9rem 1.1rem;border-left:4px solid {season_color};margin-top:0.4rem;">
+                <div style="color:{season_color};font-weight:700;">{season_label}</div>
+                <div style="color:#94a3b8;font-size:0.82rem;margin-top:4px;">t°: <b style="color:#f1f5f9">{temperature}°C</b></div>
+            </div>""", unsafe_allow_html=True)
         BASE_LOAD = [65, 50, 85, 110, 140, 148, 90]
         hours = [f"{i}:00" for i in range(0, 25, 4)]
-        
-        # 
-        fig, ax = plt.subplots(figsize=(10, 4))
-        fig.patch.set_facecolor('#0f172a')
-        ax.set_facecolor('#1e293b')
-        ax.plot(hours, BASE_LOAD, color="#38bdf8", marker="o", linewidth=3)
-        ax.set_title("Прогноз навантаження (МВт)", color="white")
-        ax.tick_params(colors="white")
-        st.pyplot(fig)
-
-        # --- Додаткова аналітика ---
-        with st.expander("🔍 Детальний звіт по підрозділах"):
-            st.markdown("""
-            | Підрозділ | Навантаження (МВт) | Відхилення від норми | Статус |
-            | :--- | :--- | :--- | :--- |
-            | СО «Вінницькі міські ЕМ» | 45.2 | +1.2% | 🟢 Норма |
-            | СО «Гайсинські ЕМ» | 22.1 | -0.5% | 🟢 Норма |
-            | СО «Жмеринські ЕМ» | 31.4 | +4.8% | ⚠️ Увага |
-            """)
-            st.button("📥 Вивантажити звіт по підрозділах (.pdf)")
-
-        # --- Блок рекомендацій ---
-        st.subheader("💡 Рекомендації SmartGrid AI")
-        st.success("Система працює стабільно. Додаткова генерація не потрібна.")
-        st.info("Рекомендовано провести профілактичний огляд ТП-245 згідно з чергою ТО.")
+        LOAD_THRESHOLD_HIGH = 160.0; LOAD_THRESHOLD_LOW = 35.0
+        def compute_load_for_temp(base_load, temp):
+            if temp < 0: factor = 1.0 + 0.04 * abs(temp)
+            elif temp <= 20: factor = 1.0 - 0.015 * (temp - 15)
+            else: factor = 0.925 + 0.025 * (temp - 20)
+            return [round(v * factor, 1) for v in base_load]
+        predicted_load = compute_load_for_temp(BASE_LOAD, temperature)
+        actual_load = [v + (i % 3 - 1) * 2.5 for i, v in enumerate(predicted_load)]
+        overload_hours = [hours[i] for i, v in enumerate(predicted_load) if v > LOAD_THRESHOLD_HIGH]
+        underload_hours = [hours[i] for i, v in enumerate(predicted_load) if v < LOAD_THRESHOLD_LOW]
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.2))
+        fig.patch.set_facecolor("#0f172a")
+        ax1.set_facecolor("#1e293b")
+        ax1.plot(hours, actual_load, label="Фактичне навантаження (МВт)", color="#38bdf8", marker="o", linewidth=2.5, markersize=6)
+        ax1.plot(hours, predicted_load, label=f"Прогноз SmartGrid AI ({temperature}°C)", color="#a855f7", linestyle="--", linewidth=2)
+        ax1.axhline(y=LOAD_THRESHOLD_HIGH, color="#ef4444", linestyle=":", linewidth=1.5)
+        ax1.axhline(y=LOAD_THRESHOLD_LOW, color="#f59e0b", linestyle=":", linewidth=1.5)
+        ax1.set_xticks(range(len(hours))); ax1.set_xticklabels(hours, color="#94a3b8", fontsize=8)
+        ax1.set_title(f"Прогноз навантаження при {temperature}°C", color="#f1f5f9", fontsize=10)
+        ax1.legend(fontsize=7, facecolor="#1e293b", edgecolor="#334155", labelcolor="#cbd5e1")
+        ax1.grid(True, alpha=0.15, color="#334155"); ax1.tick_params(colors="#64748b"); ax1.spines[:].set_color("#334155")
+        ax1.set_ylabel("МВт", color="#64748b", fontsize=9); ax1.set_ylim(0, 200)
+        ax2.set_facecolor("#1e293b")
+        current_logs_df = pd.DataFrame(st.session_state.log_data)
+        types_distribution = current_logs_df["Тип"].value_counts()
+        wedge_colors = ["#ef4444","#f59e0b","#10b981","#38bdf8","#bc5090"]
+        wedges, texts, autotexts = ax2.pie(types_distribution.values, labels=types_distribution.index, colors=wedge_colors[:len(types_distribution)], autopct="%1.1f%%", startangle=90, wedgeprops=dict(edgecolor="#0f172a", linewidth=2))
+        for t in texts: t.set_color("#94a3b8"); t.set_fontsize(8)
+        for at in autotexts: at.set_color("#f1f5f9"); at.set_fontsize(8)
+        ax2.set_title("Розподіл подій у журналі", color="#f1f5f9", fontsize=10)
+        plt.tight_layout(pad=2.0); st.pyplot(fig); plt.close(fig)
+        if overload_hours:
+            st.error(f"🚨 Прогнозується перевантаження в: **{', '.join(overload_hours)}**")
+        else:
+            st.success(f"✅ Прогнозоване навантаження при {temperature}°C в межах норми. Пік: **{max(predicted_load)} МВт**.")
 
 # ==========================================
 # 💰 ВКЛАДКА: CRM ТА БІЛІНГ
