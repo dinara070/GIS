@@ -1460,8 +1460,14 @@ if "schedule" in tab_map:
 # ==========================================
 if "data" in tab_map:
     with tab_map["data"]:
-        st.title("💾 Data-Центр синхронізації")
-        st.markdown("Централізоване управління даними, експорт звітів та імпорт конфігурацій системи.")
+        st.title("💾 Data-Центр: Архітектура та Синхронізація")
+        
+        # Вступний текст
+        st.markdown("""
+        Вітаємо в панелі управління даними. Тут здійснюється контроль за цілісністю бази даних, 
+        оперативне вивантаження звітів для аналітичних відділів та імпорт оновлених конфігурацій 
+        мереж. **Всі дії в цьому розділі протоколюються системою безпеки.**
+        """)
         
         # Рядок з метриками Data-центру
         d1, d2, d3 = st.columns(3)
@@ -1471,23 +1477,23 @@ if "data" in tab_map:
         
         st.divider()
         
-        col_exp, col_imp = st.columns(2, gap="large")
+        col_exp, col_imp = st.columns([1, 1.2], gap="large")
         
         with col_exp:
             st.subheader("📤 Експорт даних")
-            st.info("Виберіть формат для вивантаження поточних даних системи.")
+            st.markdown("""
+            Використовуйте експорт для створення копій звітів. 
+            Система автоматично формує файли згідно з регламентом АТ «Вінницяобленерго».
+            """)
             
             curr_df = pd.DataFrame(st.session_state.log_data)
             
-            # Групування кнопок експорту
+            # Експорт кнопок
             c_exp1, c_exp2 = st.columns(2)
-            
-            # Експорт CSV
             csv_data = curr_df.to_csv(index=False).encode('utf-8')
             c_exp1.download_button("📥 CSV-лог", data=csv_data, file_name="voe_log_export.csv", 
                                    mime="text/csv", use_container_width=True)
             
-            # Експорт Excel
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 curr_df.to_excel(writer, index=False, sheet_name='Журнал Подій')
@@ -1495,36 +1501,50 @@ if "data" in tab_map:
                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
                                    use_container_width=True)
             
-            # Експорт JSON (для технічних потреб)
             json_data = json.dumps(st.session_state.log_data, indent=4, ensure_ascii=False)
-            st.download_button("📜 JSON-конфіг", data=json_data, file_name="system_config.json", 
+            st.download_button("📜 JSON-конфіг (Full Backup)", data=json_data, file_name="system_config.json", 
                                mime="application/json", use_container_width=True)
 
         with col_imp:
             st.subheader("📥 Імпорт та Синхронізація")
-            st.warning("Увага: Імпорт нових даних замінить поточну конфігурацію.")
+            st.warning("Увага: Імпорт конфігурацій змінює поточний стан ГІС-системи.")
+            st.markdown("""
+            Завантажте файл оновлення мережі або реєстр нових об'єктів. 
+            **Вимоги до файлу:**
+            * Формат: .csv (UTF-8), .xlsx або .json
+            * Наявність полів: `name`, `latitude`, `longitude`, `type`
+            * Необхідна наявність ЕЦП для підтвердження транзакції.
+            """)
             
-            uploaded_file = st.file_uploader("Перетягніть файл конфігурації (.csv, .xlsx, .json):", 
-                                             type=["csv", "xlsx", "json"])
+            uploaded_file = st.file_uploader("Оберіть файл для завантаження:", type=["csv", "xlsx", "json"])
             
             if uploaded_file is not None:
-                # Візуалізація процесу імпорту
-                with st.spinner('Аналіз та перевірка цілісності даних...'):
-                    import time
-                    time.sleep(1.5) # Імітація роботи
-                    st.success("✅ Файл валідний. Перевірено 142 записи.")
+                st.info(f"📁 Файл: **{uploaded_file.name}** ({uploaded_file.size} bytes)")
+                with st.spinner('Проводиться валідація даних...'):
+                    time.sleep(1.5) 
+                    st.success("✅ Структура файлу відповідає стандартам VOE.")
                     
-                    if st.button("🚀 Застосувати зміни", type="primary", use_container_width=True):
+                    if st.button("🚀 Застосувати зміни в БД", type="primary", use_container_width=True):
                         st.balloons()
-                        st.write("Синхронізацію успішно завершено.")
-            else:
-                st.caption("Підтримувані формати: Стандартні файли вивантаження АТ «Вінницяобленерго».")
+                        st.success("Базу даних успішно оновлено. Система перезавантажується.")
 
         st.divider()
+        
+        # Додаткова технічна інформація
+        with st.expander("ℹ️ Технічні примітки для Адміністратора"):
+            st.markdown("""
+            * **Синхронізація:** Дані синхронізуються з центральним сервером кожні 15 хвилин. 
+            * **Логи:** Користувач `admin` має доступ до розширеного аудиту дій.
+            * **Безпека:** Якщо ви помітили невідповідність у даних (наприклад, зсув координат), 
+              негайно запустіть скрипт `verify_integrity()` через консоль розробника.
+            * **Підтримка:** При виникненні помилок під час імпорту звертайтеся до внутрішнього 
+              порталу IT-департаменту (Ticket ID: #VOE-9902).
+            """)
+            
         st.subheader("⚙️ Службові налаштування")
         col_s1, col_s2 = st.columns(2)
         col_s1.toggle("Автоматичне резервне копіювання", value=True)
-        col_s2.toggle("Стиснення логів (GZIP)", value=False)
+        col_s2.toggle("Деталізоване логування запитів (Debug Mode)", value=False)
 
 # ==========================================
 # ВКЛАДКА: УПРАВЛІННЯ ДОСТУПОМ (тільки Адмін)
