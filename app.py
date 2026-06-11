@@ -39,13 +39,13 @@ USERS_DB = {
         "subdivision": "ІТ-відділ АТ «Вінницяобленерго»"
     },
     "brigade1": {
-        "password": "brigader1",
+        "password": "brigade1",
         "role": "brigade",
         "display_name": "Бригадир Сидоренко В.П.",
         "subdivision": "Бригада №1 (ОВБ Центр)"
     },
     "brigade2": {
-        "password": "brigader2",
+        "password": "brigade2",
         "role": "brigade",
         "display_name": "Бригадир Мельник Т.С.",
         "subdivision": "Бригада №2 (Шаргородська дільниця)"
