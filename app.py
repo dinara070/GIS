@@ -6,7 +6,6 @@ import json
 import io
 import datetime
 import random as _rnd
-import time
 
 try:
     import folium
@@ -270,20 +269,22 @@ if "crm_debtors" not in st.session_state:
 TAB_DEFINITIONS = {
     "dispatcher_tabs": [
         ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"), ("📱 Мобільний клієнт", "mobile"),
-        ("⚡ ГПВ", "gpv"), ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
+        ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
     ],
     "admin_tabs": [
         ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"), ("📱 Мобільний клієнт", "mobile"),
-        ("⚡ ГПВ", "gpv"), ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
+        ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
-        ("💰 CRM та Білінг", "crm"), ("💾 Data Центр", "data"), ("👥 Управління доступом", "users"),
+        ("💰 CRM та Білінг", "crm"),
+        ("💾 Data Центр", "data"), ("👥 Управління доступом", "users"),
     ],
     "crm_tabs": [
-        ("🏠 Головна", "home"), ("💰 CRM та Білінг", "crm"),
+        ("🏠 Головна", "home"),
+        ("💰 CRM та Білінг", "crm"),
     ],
     "brigade_tabs": [
-        ("🏠 Головна", "home"), ("📱 Мобільний клієнт", "mobile"), ("⚡ ГПВ", "gpv"),
+        ("🏠 Головна", "home"), ("📱 Мобільний клієнт", "mobile"),
     ],
 }
 ROLE_TO_TAB_SET = {
@@ -332,14 +333,6 @@ def build_popup_html(obj):
 
 def build_folium_map(objects, active_layers):
     fmap = folium.Map(location=[49.0, 28.4], zoom_start=8, tiles="CartoDB dark_matter")
-    
-    # 1. Шар ГПВ (відступи рівні 4 пробілам)
-    if "gpv" in active_layers:
-        for q, status in st.session_state.gpv_data.items():
-            if status == "🔴 Відключено":
-                folium.Circle(location=[49.0, 28.4], radius=5000, color="red", fill=True).add_to(fmap)
-                
-    # 2. Шар Зон СО
     if "Зони СО" in active_layers:
         SO_ZONES = [
             {"name": "СО «Вінницькі міські ЕМ»", "color": "#38bdf8",
@@ -358,8 +351,6 @@ def build_folium_map(objects, active_layers):
                            dash_array="8 4", tooltip=folium.Tooltip(zone["name"], sticky=True),
                            popup=folium.Popup(f"<b>{zone['name']}</b>", max_width=200)).add_to(zone_group)
         zone_group.add_to(fmap)
-        
-    # 3. Шар ЛЕП
     if "ЛЕП" in active_layers:
         lep_group = folium.FeatureGroup(name="⚡ Лінії ЛЕП", show=True)
         LEP_LINES = [
@@ -374,8 +365,6 @@ def build_folium_map(objects, active_layers):
                             dash_array=lep.get("dash"), tooltip=folium.Tooltip(lep["label"], sticky=True),
                             opacity=0.85).add_to(lep_group)
         lep_group.add_to(fmap)
-        
-    # 4. Шар Об'єкти
     if "Об'єкти" in active_layers:
         obj_group = folium.FeatureGroup(name="📍 Об'єкти мережі", show=True)
         for obj in objects:
@@ -392,7 +381,6 @@ def build_folium_map(objects, active_layers):
                           popup=folium.Popup(build_popup_html(obj), max_width=300),
                           icon=folium.Icon(color=color, icon=icon, prefix="fa")).add_to(obj_group)
         obj_group.add_to(fmap)
-        
     legend_html = """
     <div style="position:fixed;bottom:30px;left:30px;z-index:9999;background:#1e293b;color:#f1f5f9;
                 padding:12px 16px;border-radius:8px;font-size:12px;border:1px solid #334155;
@@ -1515,61 +1503,6 @@ if "schedule" in tab_map:
         st.divider()
         st.subheader("📋 Поточний графік:")
         st.table(pd.DataFrame(st.session_state.schedule_data))
-
-# ==========================================
-# ГПВ — ДАНІ ТА СТРУКТУРА
-# ==========================================
-if "gpv_data" not in st.session_state:
-    # 6 черг, кожна має підгрупи 1.1–6.2
-    st.session_state.gpv_data = {
-        f"{c}.{s}": _rnd.choice(["🟢 Активно", "🔴 Відключено", "🟡 Попередження"]) 
-        for c in range(1, 7) for s in range(1, 3)
-    }
-
-# ==========================================
-# ВКЛАДКА: ГПВ (Графіки відключень)
-# ==========================================
-if "gpv" in tab_map:
-    with tab_map["gpv"]:
-        st.title("⚡ Графіки погодинних відключень (ГПВ)")
-        
-        tab_user, tab_disp = st.tabs(["👤 Перевірка адреси", "🛠️ Керування ГПВ"])
-        
-        with tab_user:
-            st.markdown("### 🔍 Перевірка черги за адресою")
-            addr = st.text_input("Введіть адресу (вулиця, будинок):")
-            if addr:
-                # Симуляція вибору черги для адреси
-                q = _rnd.choice(list(st.session_state.gpv_data.keys()))
-                status = st.session_state.gpv_data[q]
-                st.info(f"Адреса {addr} належить до **Черги {q}**")
-                
-                # Кольорове відображення статусу
-                status_color = {"🟢 Активно": "green", "🔴 Відключено": "red", "🟡 Попередження": "orange"}
-                st.markdown(f"Поточний стан: <span style='color:{status_color.get(status, 'black')}; font-weight:bold;'>{status}</span>", unsafe_allow_html=True)
-                
-            st.divider()
-            st.markdown("#### 🔔 Підписка на сповіщення")
-            email = st.text_input("Email для сповіщень:")
-            if st.button("Підписатися"):
-                st.success(f"Ви підписані на сповіщення для черги {q if addr else 'обраної'}")
-
-        with tab_disp:
-            if user_role in ["admin", "dispatcher"]:
-                st.markdown("### ⚙️ Матриця керування чергами")
-                # Відображення черг у вигляді матриці
-                cols = st.columns(4)
-                all_keys = list(st.session_state.gpv_data.keys())
-                for i, q in enumerate(all_keys):
-                    with cols[i % 4]:
-                        new_status = st.selectbox(f"Черга {q}", ["🟢 Активно", "🔴 Відключено", "🟡 Попередження"], 
-                                                 index=["🟢 Активно", "🔴 Відключено", "🟡 Попередження"].index(st.session_state.gpv_data[q]))
-                        st.session_state.gpv_data[q] = new_status
-                
-                if st.button("🚀 Застосувати зміни для всіх черг"):
-                    st.toast("Зміни в ГПВ розіслані споживачам!")
-            else:
-                st.error("Доступ обмежено. Тільки для диспетчерів та адмінів.")
 
 # ==========================================
 # ВКЛАДКА: DATA ЦЕНТР (тільки Адмін)
