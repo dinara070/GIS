@@ -332,12 +332,14 @@ def build_popup_html(obj):
 
 def build_folium_map(objects, active_layers):
     fmap = folium.Map(location=[49.0, 28.4], zoom_start=8, tiles="CartoDB dark_matter")
-    # Додати всередину функції build_folium_map (після ініціалізації fmap)
-if "gpv" in active_layers:
-    # Приклад: якщо статус черги "🔴 Відключено", фарбуємо певні зони в червоний
-    for q, status in st.session_state.gpv_data.items():
-        if status == "🔴 Відключено":
-             folium.Circle(location=[49.0, 28.4], radius=5000, color="red", fill=True).add_to(fmap)
+    
+    # 1. Шар ГПВ (відступи рівні 4 пробілам)
+    if "gpv" in active_layers:
+        for q, status in st.session_state.gpv_data.items():
+            if status == "🔴 Відключено":
+                folium.Circle(location=[49.0, 28.4], radius=5000, color="red", fill=True).add_to(fmap)
+                
+    # 2. Шар Зон СО
     if "Зони СО" in active_layers:
         SO_ZONES = [
             {"name": "СО «Вінницькі міські ЕМ»", "color": "#38bdf8",
@@ -356,6 +358,8 @@ if "gpv" in active_layers:
                            dash_array="8 4", tooltip=folium.Tooltip(zone["name"], sticky=True),
                            popup=folium.Popup(f"<b>{zone['name']}</b>", max_width=200)).add_to(zone_group)
         zone_group.add_to(fmap)
+        
+    # 3. Шар ЛЕП
     if "ЛЕП" in active_layers:
         lep_group = folium.FeatureGroup(name="⚡ Лінії ЛЕП", show=True)
         LEP_LINES = [
@@ -370,6 +374,8 @@ if "gpv" in active_layers:
                             dash_array=lep.get("dash"), tooltip=folium.Tooltip(lep["label"], sticky=True),
                             opacity=0.85).add_to(lep_group)
         lep_group.add_to(fmap)
+        
+    # 4. Шар Об'єкти
     if "Об'єкти" in active_layers:
         obj_group = folium.FeatureGroup(name="📍 Об'єкти мережі", show=True)
         for obj in objects:
@@ -386,6 +392,7 @@ if "gpv" in active_layers:
                           popup=folium.Popup(build_popup_html(obj), max_width=300),
                           icon=folium.Icon(color=color, icon=icon, prefix="fa")).add_to(obj_group)
         obj_group.add_to(fmap)
+        
     legend_html = """
     <div style="position:fixed;bottom:30px;left:30px;z-index:9999;background:#1e293b;color:#f1f5f9;
                 padding:12px 16px;border-radius:8px;font-size:12px;border:1px solid #334155;
