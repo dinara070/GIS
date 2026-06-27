@@ -332,8 +332,8 @@ def build_popup_html(obj):
 
 def build_folium_map(objects, active_layers):
     fmap = folium.Map(location=[49.0, 28.4], zoom_start=8, tiles="CartoDB dark_matter")
-    # Додати всередину функції build_folium_map (після ініціалізації fmap)
-if "gpv" in active_layers:
+        # Додати всередину функції build_folium_map (після ініціалізації fmap)
+    if "gpv" in active_layers:
     # Приклад: якщо статус черги "🔴 Відключено", фарбуємо певні зони в червоний
     for q, status in st.session_state.gpv_data.items():
         if status == "🔴 Відключено":
