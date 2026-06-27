@@ -5,6 +5,7 @@ import matplotlib.patches as mpatches
 import json
 import io
 import datetime
+import time
 import random as _rnd
 
 try:
@@ -21,6 +22,186 @@ st.set_page_config(
 )
 
 plt.style.use('dark_background')
+
+# ==========================================
+# ГЛОБАЛЬНА ТЕМА ОФОРМЛЕННЯ (SCADA / Control-room style)
+# ==========================================
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap');
+
+    :root {
+        --bg-deep: #060a13;
+        --bg-primary: #0b1220;
+        --bg-card: #141d2e;
+        --bg-card-soft: #18223380;
+        --border-soft: #28344a;
+        --border-strong: #3a4a66;
+        --accent-blue: #38bdf8;
+        --accent-blue-deep: #1d4ed8;
+        --accent-purple: #a78bfa;
+        --accent-green: #34d399;
+        --accent-amber: #fbbf24;
+        --accent-red: #f87171;
+        --text-primary: #eef2f8;
+        --text-secondary: #93a3bd;
+        --text-muted: #5d6e8c;
+    }
+
+    html, body, [class*="css"] {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    }
+
+    /* Числа/координати/тех. дані — моноширинний акцент, як на щитах диспетчерської */
+    div[data-testid="stMetricValue"],
+    code, kbd {
+        font-family: 'JetBrains Mono', 'Consolas', monospace !important;
+    }
+
+    .stApp {
+        background:
+            radial-gradient(circle at 8% -10%, #16243f 0%, transparent 45%),
+            radial-gradient(circle at 100% 10%, #1a1530 0%, transparent 40%),
+            linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-deep) 100%) !important;
+        background-attachment: fixed !important;
+    }
+
+    /* ── Sidebar ── */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0a0f1d 0%, #060a13 100%) !important;
+        border-right: 1px solid var(--border-soft);
+    }
+    section[data-testid="stSidebar"] * { color: var(--text-primary); }
+    section[data-testid="stSidebar"] hr { border-color: var(--border-soft) !important; }
+    section[data-testid="stSidebar"] .stButton > button {
+        border: 1px solid var(--border-strong) !important;
+        background: linear-gradient(135deg, #1b2536 0%, #131b2a 100%) !important;
+    }
+
+    /* ── Заголовки ── */
+    h1, h2, h3 { letter-spacing: -0.02em; color: var(--text-primary); }
+    h4, h5, h6 { color: var(--text-primary); }
+
+    /* ── Кнопки ── */
+    .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button {
+        border-radius: 10px !important;
+        border: 1px solid var(--border-strong) !important;
+        background: linear-gradient(135deg, #1b2536 0%, #131b2a 100%) !important;
+        color: var(--text-primary) !important;
+        font-weight: 600 !important;
+        transition: all 0.18s ease !important;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.35);
+    }
+    .stButton > button:hover, .stDownloadButton > button:hover, .stFormSubmitButton > button:hover {
+        border-color: var(--accent-blue) !important;
+        box-shadow: 0 0 0 3px rgba(56,189,248,0.15), 0 4px 14px rgba(0,0,0,0.45) !important;
+        transform: translateY(-1px);
+        color: var(--accent-blue) !important;
+    }
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 55%, #38bdf8 100%) !important;
+        border: none !important;
+        color: #fff !important;
+        box-shadow: 0 4px 16px rgba(37,99,235,0.4) !important;
+    }
+    .stButton > button[kind="primary"]:hover {
+        box-shadow: 0 6px 22px rgba(56,189,248,0.5) !important;
+        transform: translateY(-1px);
+        color: #fff !important;
+    }
+
+    /* ── Вкладки ── */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 4px;
+        border-bottom: 1px solid var(--border-soft);
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: transparent;
+        border-radius: 8px 8px 0 0;
+        color: var(--text-secondary);
+        font-weight: 600;
+        padding: 10px 18px;
+        transition: all 0.15s ease;
+    }
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: rgba(56,189,248,0.08);
+        color: var(--text-primary);
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: rgba(56,189,248,0.12) !important;
+        color: var(--accent-blue) !important;
+        box-shadow: inset 0 -2px 0 var(--accent-blue) !important;
+    }
+
+    /* ── Поля вводу ── */
+    .stTextInput input, .stNumberInput input, .stDateInput input,
+    .stSelectbox div[data-baseweb="select"] > div,
+    .stMultiSelect div[data-baseweb="select"] > div,
+    .stTextArea textarea {
+        background-color: var(--bg-card) !important;
+        border: 1px solid var(--border-soft) !important;
+        color: var(--text-primary) !important;
+        border-radius: 8px !important;
+    }
+    .stTextInput input:focus, .stNumberInput input:focus, .stTextArea textarea:focus {
+        border-color: var(--accent-blue) !important;
+        box-shadow: 0 0 0 2px rgba(56,189,248,0.2) !important;
+    }
+    .stCheckbox label, .stRadio label { color: var(--text-secondary) !important; }
+
+    /* ── Контейнери з рамкою (st.container(border=True)) ── */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        border-radius: 14px !important;
+        border-color: var(--border-soft) !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] > div {
+        background: linear-gradient(180deg, rgba(20,29,46,0.65) 0%, rgba(11,18,32,0.65) 100%);
+        border-radius: 14px !important;
+    }
+
+    /* ── Метрики ── */
+    div[data-testid="stMetric"] {
+        background: var(--bg-card);
+        border: 1px solid var(--border-soft);
+        border-radius: 12px;
+        padding: 0.9rem 1.1rem;
+    }
+    div[data-testid="stMetricLabel"] { color: var(--text-secondary) !important; }
+    div[data-testid="stMetricValue"] { color: var(--text-primary) !important; }
+
+    /* ── Таблиці / DataFrame ── */
+    div[data-testid="stDataFrame"] { border-radius: 10px; overflow: hidden; border: 1px solid var(--border-soft); }
+
+    /* ── Expander ── */
+    details {
+        background: var(--bg-card) !important;
+        border-radius: 10px !important;
+        border: 1px solid var(--border-soft) !important;
+    }
+    summary { color: var(--text-primary) !important; }
+
+    /* ── Алерти / toast ── */
+    div[data-testid="stAlert"] { border-radius: 10px; }
+
+    /* ── Власна картка-показник (stat / KPI) ── */
+    .metric-tile { transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease; }
+    .metric-tile:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 10px 24px rgba(0,0,0,0.4);
+        border-color: var(--accent-blue) !important;
+    }
+
+    /* ── Скролбар ── */
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: var(--bg-primary); }
+    ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 6px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--accent-blue); }
+
+    /* ── Прибрати штатне меню/футер Streamlit ── */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+</style>
+""", unsafe_allow_html=True)
 
 # ==========================================
 # СИСТЕМА АВТОРИЗАЦІЇ
@@ -93,10 +274,10 @@ if not st.session_state.authenticated:
     col_l, col_center, col_r = st.columns([1, 1.4, 1])
     with col_center:
         st.markdown("""
-        <div style='text-align:center; padding: 2rem 0 1rem 0;'>
-            <div style='font-size: 3rem;'>⚡</div>
-            <h2 style='color: #185FA5; margin-bottom: 0;'>АТ «Вінницяобленерго»</h2>
-            <p style='color: #555; font-size: 0.9rem; margin-top: 0.3rem;'>
+        <div style='text-align:center; padding: 2.5rem 0 1.2rem 0;'>
+            <div style='font-size: 3.2rem; filter: drop-shadow(0 0 18px rgba(56,189,248,0.55));'>⚡</div>
+            <h2 style='color: #7dd3fc; margin-bottom: 0; letter-spacing:-0.01em;'>АТ «Вінницяобленерго»</h2>
+            <p style='color: #93a3bd; font-size: 0.92rem; margin-top: 0.4rem; letter-spacing: 2px; text-transform: uppercase;'>
                 ГІС Диспетчерська Система v6.0 — Вхід до системи
             </p>
         </div>
@@ -112,7 +293,7 @@ if not st.session_state.authenticated:
                 st.rerun()
         st.markdown("""
         <div style='text-align:center; margin-top: 1.5rem;'>
-            <p style='color: #888; font-size: 0.78rem;'>
+            <p style='color: #5d6e8c; font-size: 0.78rem;'>
                 🔒 Система розмежування доступу за ролями.<br>
                 Для отримання облікових даних зверніться до ІТ-відділу.
             </p>
@@ -134,11 +315,30 @@ current_user = st.session_state.current_user
 user_role = current_user["role"]
 
 with st.sidebar:
-    st.markdown(f"### {ROLE_LABELS.get(user_role, '👤 Користувач')}")
-    st.markdown(f"**{current_user['display_name']}**")
-    st.markdown(f"*{current_user['subdivision']}*")
+    st.markdown(f"""
+    <div style="background:linear-gradient(135deg,#16243f 0%,#0e1626 100%);border:1px solid #28344a;
+                border-radius:12px;padding:1rem 1.1rem;margin-bottom:0.5rem;">
+        <div style="color:#7dd3fc;font-size:0.78rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;">
+            {ROLE_LABELS.get(user_role, '👤 Користувач')}
+        </div>
+        <div style="color:#eef2f8;font-weight:700;font-size:1.02rem;margin-top:6px;line-height:1.3;">
+            {current_user['display_name']}
+        </div>
+        <div style="color:#93a3bd;font-size:0.8rem;margin-top:2px;">{current_user['subdivision']}</div>
+    </div>
+    """, unsafe_allow_html=True)
     st.divider()
-    st.markdown(f"🟢 Сеанс активний  \n`{datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}`")
+    st.markdown(f"""
+    <div style="display:flex;align-items:center;gap:8px;color:#93a3bd;font-size:0.82rem;">
+        <span style="height:8px;width:8px;border-radius:50%;background:#34d399;
+                     box-shadow:0 0 8px #34d399;display:inline-block;"></span>
+        Сеанс активний
+    </div>
+    <div style="color:#5d6e8c;font-size:0.78rem;font-family:'JetBrains Mono',monospace;margin-top:3px;">
+        {datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("<div style='margin-top:0.8rem'></div>", unsafe_allow_html=True)
     if st.button("🚪 Вийти з системи", use_container_width=True):
         do_logout()
         st.rerun()
@@ -430,7 +630,7 @@ if "home" in tab_map:
         s1, s2, s3, s4, s5, s6 = st.columns(6)
         def stat_card(col, icon, value, label, color="#38bdf8"):
             col.markdown(f"""
-            <div style="background:#1e293b;border-radius:10px;padding:1rem 0.8rem;text-align:center;border:1px solid #334155;">
+            <div class="metric-tile" style="background:#1e293b;border-radius:10px;padding:1rem 0.8rem;text-align:center;border:1px solid #334155;">
                 <div style="font-size:1.6rem;">{icon}</div>
                 <div style="color:{color};font-size:1.5rem;font-weight:700;line-height:1.2;">{value}</div>
                 <div style="color:#64748b;font-size:0.75rem;margin-top:3px;">{label}</div>
@@ -952,7 +1152,7 @@ if "crm" in tab_map:
         def crm_kpi(col, icon, value, label, delta=None, delta_color="#22c55e"):
             delta_html = f'<div style="color:{delta_color};font-size:0.75rem;margin-top:2px;">{delta}</div>' if delta else ""
             col.markdown(f"""
-            <div style="background:#1e293b;border-radius:10px;padding:0.9rem 0.7rem;text-align:center;border:1px solid #334155;">
+            <div class="metric-tile" style="background:#1e293b;border-radius:10px;padding:0.9rem 0.7rem;text-align:center;border:1px solid #334155;">
                 <div style="font-size:1.5rem;">{icon}</div>
                 <div style="color:#f1f5f9;font-size:1.3rem;font-weight:700;line-height:1.2;">{value}</div>
                 <div style="color:#64748b;font-size:0.72rem;margin-top:3px;">{label}</div>
