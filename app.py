@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib.colors import ListedColormap
 import json
 import io
 import datetime
 import random as _rnd
-import time
 
 try:
     import folium
@@ -265,25 +266,86 @@ if "crm_debtors" not in st.session_state:
         })
 
 # ==========================================
+# ГПВ — ІНІЦІАЛІЗАЦІЯ ДАНИХ (Графіки погодинних відключень)
+# ==========================================
+GPV_QUEUES = ["1.1", "1.2", "2.1", "2.2", "3.1", "3.2"]
+
+GPV_STATUS_CODES = {
+    0: {"label": "🟢 Світло є", "color": "#16a34a"},
+    1: {"label": "🔴 Відключення", "color": "#dc2626"},
+    2: {"label": "🟡 Можливе відключення", "color": "#d97706"},
+}
+
+def _default_gpv_template(level=2):
+    """Генерує базовий шаблон графіка на основі рівня обмежень Укренерго (1-3).
+    Чим вищий рівень — тим більше годин відключення на чергу."""
+    _g_rnd = _rnd.Random(7 + level)
+    template = {}
+    for q in GPV_QUEUES:
+        off_hours = _g_rnd.sample(range(24), k=min(22, 3 + level * 2))
+        remaining = [h for h in range(24) if h not in off_hours]
+        maybe_hours = _g_rnd.sample(remaining, k=min(len(remaining), 2)) if remaining else []
+        row = [0] * 24
+        for h in off_hours:
+            row[h] = 1
+        for h in maybe_hours:
+            row[h] = 2
+        template[q] = row
+    return template
+
+if "gpv_restriction_level" not in st.session_state:
+    st.session_state.gpv_restriction_level = 2  # 1 = м'який, 2 = середній, 3 = жорсткий
+
+if "gpv_schedule" not in st.session_state:
+    st.session_state.gpv_schedule = _default_gpv_template(st.session_state.gpv_restriction_level)
+
+if "gpv_address_map" not in st.session_state:
+    st.session_state.gpv_address_map = {
+        "м. Вінниця, вул. Соборна": "2.1",
+        "м. Вінниця, вул. Хмельницьке шосе": "1.2",
+        "м. Вінниця, вул. Київська": "3.1",
+        "м. Вінниця, вул. Замостянська": "2.2",
+        "м. Шаргород, вул. Соборна": "1.1",
+        "м. Шаргород, вул. Незалежності": "1.2",
+        "м. Жмеринка, центральна частина": "2.1",
+        "м. Хмільник, центральна частина": "3.2",
+        "м. Гайсин, центральна частина": "2.2",
+        "м. Калинівка, центральна частина": "1.1",
+        "м. Могилів-Подільський, центральна частина": "3.1",
+        "м. Тульчин, центральна частина": "2.2",
+    }
+
+if "gpv_compliance_log" not in st.session_state:
+    st.session_state.gpv_compliance_log = [
+        {"Час": "23.05 06:00", "Черга": "1.1", "Подія": "Початок планового відключення", "Відхилення": "0 хв"},
+        {"Час": "23.05 10:00", "Черга": "1.1", "Подія": "Відновлення живлення", "Відхилення": "+12 хв (затримка)"},
+        {"Час": "23.05 14:00", "Черга": "2.2", "Подія": "Початок планового відключення", "Відхилення": "0 хв"},
+    ]
+
+# ==========================================
 # ГОЛОВНЕ МЕНЮ
 # ==========================================
 TAB_DEFINITIONS = {
     "dispatcher_tabs": [
-        ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"), ("📱 Мобільний клієнт", "mobile"),
-        ("⚡ ГПВ", "gpv"), ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
+        ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"), ("🔌 Графік відключень (ГПВ)", "gpv"),
+        ("📱 Мобільний клієнт", "mobile"),
+        ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
     ],
     "admin_tabs": [
-        ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"), ("📱 Мобільний клієнт", "mobile"),
-        ("⚡ ГПВ", "gpv"), ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
+        ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"), ("🔌 Графік відключень (ГПВ)", "gpv"),
+        ("📱 Мобільний клієнт", "mobile"),
+        ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
-        ("💰 CRM та Білінг", "crm"), ("💾 Data Центр", "data"), ("👥 Управління доступом", "users"),
+        ("💰 CRM та Білінг", "crm"),
+        ("💾 Data Центр", "data"), ("👥 Управління доступом", "users"),
     ],
     "crm_tabs": [
-        ("🏠 Головна", "home"), ("💰 CRM та Білінг", "crm"),
+        ("🏠 Головна", "home"), ("🔌 Графік відключень (ГПВ)", "gpv"),
+        ("💰 CRM та Білінг", "crm"),
     ],
     "brigade_tabs": [
-        ("🏠 Головна", "home"), ("📱 Мобільний клієнт", "mobile"), ("⚡ ГПВ", "gpv"),
+        ("🏠 Головна", "home"), ("🔌 Графік відключень (ГПВ)", "gpv"), ("📱 Мобільний клієнт", "mobile"),
     ],
 }
 ROLE_TO_TAB_SET = {
@@ -332,14 +394,6 @@ def build_popup_html(obj):
 
 def build_folium_map(objects, active_layers):
     fmap = folium.Map(location=[49.0, 28.4], zoom_start=8, tiles="CartoDB dark_matter")
-    
-    # 1. Шар ГПВ (відступи рівні 4 пробілам)
-    if "gpv" in active_layers:
-        for q, status in st.session_state.gpv_data.items():
-            if status == "🔴 Відключено":
-                folium.Circle(location=[49.0, 28.4], radius=5000, color="red", fill=True).add_to(fmap)
-                
-    # 2. Шар Зон СО
     if "Зони СО" in active_layers:
         SO_ZONES = [
             {"name": "СО «Вінницькі міські ЕМ»", "color": "#38bdf8",
@@ -358,8 +412,6 @@ def build_folium_map(objects, active_layers):
                            dash_array="8 4", tooltip=folium.Tooltip(zone["name"], sticky=True),
                            popup=folium.Popup(f"<b>{zone['name']}</b>", max_width=200)).add_to(zone_group)
         zone_group.add_to(fmap)
-        
-    # 3. Шар ЛЕП
     if "ЛЕП" in active_layers:
         lep_group = folium.FeatureGroup(name="⚡ Лінії ЛЕП", show=True)
         LEP_LINES = [
@@ -374,8 +426,6 @@ def build_folium_map(objects, active_layers):
                             dash_array=lep.get("dash"), tooltip=folium.Tooltip(lep["label"], sticky=True),
                             opacity=0.85).add_to(lep_group)
         lep_group.add_to(fmap)
-        
-    # 4. Шар Об'єкти
     if "Об'єкти" in active_layers:
         obj_group = folium.FeatureGroup(name="📍 Об'єкти мережі", show=True)
         for obj in objects:
@@ -392,7 +442,6 @@ def build_folium_map(objects, active_layers):
                           popup=folium.Popup(build_popup_html(obj), max_width=300),
                           icon=folium.Icon(color=color, icon=icon, prefix="fa")).add_to(obj_group)
         obj_group.add_to(fmap)
-        
     legend_html = """
     <div style="position:fixed;bottom:30px;left:30px;z-index:9999;background:#1e293b;color:#f1f5f9;
                 padding:12px 16px;border-radius:8px;font-size:12px;border:1px solid #334155;
@@ -462,6 +511,7 @@ if "home" in tab_map:
             st.markdown("### 🧩 Функціональні модулі системи")
             modules = [
                 ("🗺️","Диспетчер ГІС-мапи","Інтерактивна Folium-карта з шарами ЛЕП, зонами СО та кольоровими маркерами аварій."),
+                ("🔌","Графік відключень (ГПВ)","Управління черговими графіками погодинних відключень за рівнями обмежень Укренерго, пошук черги за адресою, журнал виконання."),
                 ("📱","Мобільний клієнт бригади","Цифровий наряд-допуск для виїзних бригад: чек-лист безпеки, звіт про виконану роботу."),
                 ("🌡️","SmartGrid AI — Аналітика","Симуляція навантаження залежно від температури (-20°C…+40°C), детекція аномалій напруги, Threshold Alerts."),
                 ("💰","CRM та Білінг","Дашборд оплат, теплова карта боргів по дільницях, калькулятор тарифних зон (2/3-зонний лічильник)."),
@@ -598,6 +648,169 @@ if "map" in tab_map:
             st.download_button(label="📄 Завантажити Наряд-Допуск (.txt)",
                                data=permit_text, file_name=f"permit_{obj.get('name','TP')}.txt",
                                mime="text/plain", use_container_width=True)
+
+# ==========================================
+# 🔌 ВКЛАДКА: ГРАФІК ПОГОДИННИХ ВІДКЛЮЧЕНЬ (ГПВ)
+# ==========================================
+if "gpv" in tab_map:
+    with tab_map["gpv"]:
+        st.title("🔌 Графік погодинних відключень (ГПВ)")
+        st.caption("Координація з диспетчерським центром НЕК «Укренерго». Графік застосовується відповідно "
+                   "до затвердженого рівня обмежень споживання електроенергії по області.")
+
+        can_edit_gpv = user_role in ("dispatcher", "admin")
+
+        lvl_col1, lvl_col2, lvl_col3 = st.columns([1.6, 1, 1])
+        level_labels = {
+            1: "🟢 Рівень 1 — м'які обмеження",
+            2: "🟡 Рівень 2 — середні обмеження",
+            3: "🔴 Рівень 3 — жорсткі обмеження",
+        }
+        with lvl_col1:
+            if can_edit_gpv:
+                new_level = st.selectbox(
+                    "Поточний рівень обмежень (команда Укренерго):",
+                    options=[1, 2, 3], format_func=lambda x: level_labels[x],
+                    index=st.session_state.gpv_restriction_level - 1, key="gpv_level_select"
+                )
+                if new_level != st.session_state.gpv_restriction_level:
+                    if st.button("🔄 Перегенерувати графік під новий рівень", type="primary"):
+                        st.session_state.gpv_restriction_level = new_level
+                        st.session_state.gpv_schedule = _default_gpv_template(new_level)
+                        st.session_state.gpv_compliance_log.insert(0, {
+                            "Час": datetime.datetime.now().strftime("%d.%m %H:%M"),
+                            "Черга": "Усі",
+                            "Подія": f"Зміна рівня обмежень на {new_level} ({level_labels[new_level]})",
+                            "Відхилення": f"Оператор: {current_user['display_name']}"
+                        })
+                        st.rerun()
+            else:
+                st.info(level_labels[st.session_state.gpv_restriction_level])
+        with lvl_col2:
+            avg_off = sum(row.count(1) for row in st.session_state.gpv_schedule.values()) / len(GPV_QUEUES)
+            st.metric("Сер. год. відключень/добу", f"{avg_off:.1f} год")
+        with lvl_col3:
+            st.metric("Активних черг", len(GPV_QUEUES))
+
+        st.markdown("---")
+        gc1, gc2 = st.columns([1.6, 1])
+
+        with gc1:
+            st.markdown("#### 🗓️ Матриця графіка на сьогодні")
+            fig_gpv, ax_gpv = plt.subplots(figsize=(9, 3.2))
+            fig_gpv.patch.set_facecolor("#0f172a")
+            ax_gpv.set_facecolor("#0f172a")
+            mat = np.array([st.session_state.gpv_schedule[q] for q in GPV_QUEUES])
+            gpv_cmap = ListedColormap(["#16a34a", "#dc2626", "#d97706"])
+            ax_gpv.imshow(mat, aspect="auto", cmap=gpv_cmap, vmin=0, vmax=2)
+            ax_gpv.set_yticks(range(len(GPV_QUEUES)))
+            ax_gpv.set_yticklabels(GPV_QUEUES, color="#cbd5e1", fontsize=9)
+            ax_gpv.set_xticks(range(24))
+            ax_gpv.set_xticklabels([str(h) for h in range(24)], color="#94a3b8", fontsize=7)
+            ax_gpv.set_xlabel("Година доби", color="#64748b", fontsize=8)
+            ax_gpv.set_ylabel("Черга", color="#64748b", fontsize=8)
+            for spine in ax_gpv.spines.values():
+                spine.set_visible(False)
+            legend_patches = [mpatches.Patch(color=GPV_STATUS_CODES[i]["color"], label=GPV_STATUS_CODES[i]["label"]) for i in range(3)]
+            ax_gpv.legend(handles=legend_patches, loc="upper center", bbox_to_anchor=(0.5, -0.32),
+                          ncol=3, fontsize=8, facecolor="#1e293b", edgecolor="#334155", labelcolor="#cbd5e1")
+            plt.tight_layout()
+            st.pyplot(fig_gpv)
+            plt.close(fig_gpv)
+
+            if can_edit_gpv:
+                st.markdown("#### ✏️ Редагування графіка черги")
+                edit_q = st.selectbox("Черга для редагування:", GPV_QUEUES, key="gpv_edit_queue")
+                current_row = st.session_state.gpv_schedule[edit_q]
+                off_hours_sel = st.multiselect(
+                    "Години відключення:", list(range(24)),
+                    default=[h for h, v in enumerate(current_row) if v == 1], key="gpv_off_sel"
+                )
+                maybe_hours_sel = st.multiselect(
+                    "Години можливого відключення:", list(range(24)),
+                    default=[h for h, v in enumerate(current_row) if v == 2], key="gpv_maybe_sel"
+                )
+                if st.button("💾 Зберегти зміни графіка", use_container_width=True):
+                    new_row = [0] * 24
+                    for h in off_hours_sel:
+                        new_row[h] = 1
+                    for h in maybe_hours_sel:
+                        if new_row[h] == 0:
+                            new_row[h] = 2
+                    st.session_state.gpv_schedule[edit_q] = new_row
+                    st.session_state.gpv_compliance_log.insert(0, {
+                        "Час": datetime.datetime.now().strftime("%d.%m %H:%M"),
+                        "Черга": edit_q, "Подія": "Графік оновлено диспетчером",
+                        "Відхилення": f"Оператор: {current_user['display_name']}"
+                    })
+                    st.success(f"✅ Графік для черги {edit_q} оновлено!")
+                    st.rerun()
+
+        with gc2:
+            st.markdown("#### 🔍 Перевірка за адресою")
+            st.caption("Введіть вулицю/населений пункт, щоб дізнатись чергу та час відключень (для відповіді абонентам).")
+            addr_options = list(st.session_state.gpv_address_map.keys())
+            sel_addr = st.selectbox("Адреса:", addr_options, key="gpv_addr_lookup")
+            assigned_q = st.session_state.gpv_address_map.get(sel_addr)
+            if assigned_q:
+                row = st.session_state.gpv_schedule[assigned_q]
+                off_h = [h for h, v in enumerate(row) if v == 1]
+                maybe_h = [h for h, v in enumerate(row) if v == 2]
+                st.markdown(f"""
+                <div style="background:#1e293b;border-radius:10px;padding:1rem;border:1px solid #334155;">
+                    <div style="color:#94a3b8;font-size:0.8rem;">Належить до черги</div>
+                    <div style="color:#38bdf8;font-size:1.6rem;font-weight:800;">{assigned_q}</div>
+                </div>""", unsafe_allow_html=True)
+                if off_h:
+                    st.error("🔴 Відключення: " + ", ".join(f"{h}:00–{h+1}:00" for h in off_h))
+                else:
+                    st.success("🟢 Сьогодні планових відключень немає")
+                if maybe_h:
+                    st.warning("🟡 Можливе відключення: " + ", ".join(f"{h}:00–{h+1}:00" for h in maybe_h))
+
+            if can_edit_gpv:
+                with st.expander("➕ Додати нову адресу до довідника"):
+                    new_addr = st.text_input("Адреса (вулиця, населений пункт):", key="gpv_new_addr")
+                    new_addr_q = st.selectbox("Черга:", GPV_QUEUES, key="gpv_new_addr_q")
+                    if st.button("Додати адресу", key="gpv_add_addr_btn"):
+                        if new_addr.strip():
+                            st.session_state.gpv_address_map[new_addr.strip()] = new_addr_q
+                            st.success(f"✅ Адресу «{new_addr}» додано до черги {new_addr_q}")
+                            st.rerun()
+
+            st.markdown("#### 📜 Журнал виконання графіка")
+            comp_df = pd.DataFrame(st.session_state.gpv_compliance_log)
+            st.dataframe(comp_df, use_container_width=True, hide_index=True, height=220)
+
+        st.markdown("---")
+        st.markdown("#### 📤 Публікація графіка для споживачів")
+        pub_col1, pub_col2, pub_col3 = st.columns(3)
+        gpv_export_rows = []
+        for q in GPV_QUEUES:
+            row = st.session_state.gpv_schedule[q]
+            gpv_export_rows.append({
+                "Черга": q,
+                **{f"{h}:00": GPV_STATUS_CODES[row[h]]["label"] for h in range(24)}
+            })
+        gpv_export_df = pd.DataFrame(gpv_export_rows)
+        pub_col1.download_button(
+            "📥 Графік (.csv) для сайту", data=gpv_export_df.to_csv(index=False).encode("utf-8"),
+            file_name="gpv_schedule_today.csv", mime="text/csv", use_container_width=True
+        )
+        gpv_json = json.dumps({
+            "date": datetime.date.today().isoformat(),
+            "restriction_level": st.session_state.gpv_restriction_level,
+            "schedule": st.session_state.gpv_schedule
+        }, ensure_ascii=False, indent=2)
+        pub_col2.download_button(
+            "📜 JSON для мобільного застосунку", data=gpv_json,
+            file_name="gpv_schedule.json", mime="application/json", use_container_width=True
+        )
+        if can_edit_gpv:
+            if pub_col3.button("📢 Опублікувати на сайт voe.com.ua", use_container_width=True):
+                st.toast("✅ Графік відключень опубліковано на офіційному сайті та в Telegram-каналі!")
+        else:
+            pub_col3.caption("Публікація доступна диспетчеру/адміністратору.")
 
 # ==========================================
 # ВКЛАДКА: МОБІЛЬНИЙ КЛІЄНТ
@@ -1515,61 +1728,6 @@ if "schedule" in tab_map:
         st.divider()
         st.subheader("📋 Поточний графік:")
         st.table(pd.DataFrame(st.session_state.schedule_data))
-
-# ==========================================
-# ГПВ — ДАНІ ТА СТРУКТУРА
-# ==========================================
-if "gpv_data" not in st.session_state:
-    # 6 черг, кожна має підгрупи 1.1–6.2
-    st.session_state.gpv_data = {
-        f"{c}.{s}": _rnd.choice(["🟢 Активно", "🔴 Відключено", "🟡 Попередження"]) 
-        for c in range(1, 7) for s in range(1, 3)
-    }
-
-# ==========================================
-# ВКЛАДКА: ГПВ (Графіки відключень)
-# ==========================================
-if "gpv" in tab_map:
-    with tab_map["gpv"]:
-        st.title("⚡ Графіки погодинних відключень (ГПВ)")
-        
-        tab_user, tab_disp = st.tabs(["👤 Перевірка адреси", "🛠️ Керування ГПВ"])
-        
-        with tab_user:
-            st.markdown("### 🔍 Перевірка черги за адресою")
-            addr = st.text_input("Введіть адресу (вулиця, будинок):")
-            if addr:
-                # Симуляція вибору черги для адреси
-                q = _rnd.choice(list(st.session_state.gpv_data.keys()))
-                status = st.session_state.gpv_data[q]
-                st.info(f"Адреса {addr} належить до **Черги {q}**")
-                
-                # Кольорове відображення статусу
-                status_color = {"🟢 Активно": "green", "🔴 Відключено": "red", "🟡 Попередження": "orange"}
-                st.markdown(f"Поточний стан: <span style='color:{status_color.get(status, 'black')}; font-weight:bold;'>{status}</span>", unsafe_allow_html=True)
-                
-            st.divider()
-            st.markdown("#### 🔔 Підписка на сповіщення")
-            email = st.text_input("Email для сповіщень:")
-            if st.button("Підписатися"):
-                st.success(f"Ви підписані на сповіщення для черги {q if addr else 'обраної'}")
-
-        with tab_disp:
-            if user_role in ["admin", "dispatcher"]:
-                st.markdown("### ⚙️ Матриця керування чергами")
-                # Відображення черг у вигляді матриці
-                cols = st.columns(4)
-                all_keys = list(st.session_state.gpv_data.keys())
-                for i, q in enumerate(all_keys):
-                    with cols[i % 4]:
-                        new_status = st.selectbox(f"Черга {q}", ["🟢 Активно", "🔴 Відключено", "🟡 Попередження"], 
-                                                 index=["🟢 Активно", "🔴 Відключено", "🟡 Попередження"].index(st.session_state.gpv_data[q]))
-                        st.session_state.gpv_data[q] = new_status
-                
-                if st.button("🚀 Застосувати зміни для всіх черг"):
-                    st.toast("Зміни в ГПВ розіслані споживачам!")
-            else:
-                st.error("Доступ обмежено. Тільки для диспетчерів та адмінів.")
 
 # ==========================================
 # ВКЛАДКА: DATA ЦЕНТР (тільки Адмін)
