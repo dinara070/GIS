@@ -40,6 +40,12 @@ USERS_DB = {
         "display_name": "Адміністратор Чорна Є. М.",
         "subdivision": "ІТ-відділ АТ «Вінницяобленерго»"
     },
+    "admin": {
+        "password": "admin2026",
+        "role": "admin",
+        "display_name": "Адміністратор Левицький Ю.",
+        "subdivision": "ІТ-відділ АТ «Вінницяобленерго»"
+    },
     "brigade1": {
         "password": "brigade1",
         "role": "brigade",
