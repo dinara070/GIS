@@ -192,6 +192,49 @@ if "task_closed" not in st.session_state:
     st.session_state.task_closed = False
 
 # ==========================================
+# 📨 ЗАЯВКИ КЛІЄНТІВ — ІНІЦІАЛІЗАЦІЯ ДАНИХ
+# ==========================================
+REQUEST_TYPES = ["Аварійне відключення", "Нове підключення", "Заміна/повірка лічильника",
+                  "Перерахунок / скарга на оплату", "Пошкодження майна", "Інше"]
+REQUEST_PRIORITY_SLA_HOURS = {"Критичний": 4, "Високий": 24, "Звичайний": 72}
+
+if "client_requests" not in st.session_state:
+    _rnd.seed(123)
+    _now = datetime.datetime.now()
+    _sample = [
+        ("Бойко Іван Петрович", "+380671112233", "м. Вінниця, вул. Київська, 14", "Аварійне відключення",
+         "Немає світла в будинку з ранку, сусіди теж без напруги.", "Критичний", "Нова", None),
+        ("ОСББ «Мрія»", "+380632223344", "м. Шаргород, вул. Героїв Майдану, 5", "Пошкодження майна",
+         "Опора похилилась після грози, загроза падіння на паркан.", "Високий", "В роботі", "Бригада №2 (Шаргородська дільниця)"),
+        ("Кравченко Л.П.", "+380501234567", "м. Хмільник, вул. Соборна, 22", "Заміна/повірка лічильника",
+         "Лічильник зупинився, показники не змінюються 2 тижні.", "Звичайний", "Передано бригаді", "Бригада №1 (ОВБ Центр)"),
+        ("ТОВ «БудМаш»", "+380442345566", "м. Вінниця, вул. Замостянська, 1", "Перерахунок / скарга на оплату",
+         "Не згодні з нарахуванням за квітень, прохання перевірити.", "Звичайний", "Нова", None),
+        ("Гнатюк О.В.", "+380975566778", "м. Тульчин, центральна частина", "Нове підключення",
+         "Потрібні технічні умови на підключення приватного будинку.", "Звичайний", "Виконано", "Бригада №1 (ОВБ Центр)"),
+    ]
+    st.session_state.client_requests = []
+    for i, (name, phone, addr, rtype, desc, prio, status, brigade) in enumerate(_sample):
+        created = _now - datetime.timedelta(hours=_rnd.randint(1, 60))
+        st.session_state.client_requests.append({
+            "id": f"REQ-{1000+i}",
+            "Створено": created.strftime("%d.%m.%Y %H:%M"),
+            "_created_dt": created,
+            "ПІБ / Організація": name,
+            "Телефон": phone,
+            "Адреса": addr,
+            "Тип звернення": rtype,
+            "Опис": desc,
+            "Пріоритет": prio,
+            "Статус": status,
+            "Бригада": brigade,
+            "Коментар диспетчера": "",
+        })
+
+if "request_counter" not in st.session_state:
+    st.session_state.request_counter = 1000 + len(st.session_state.client_requests)
+
+# ==========================================
 # CRM — ІНІЦІАЛІЗАЦІЯ ДАНИХ
 # ==========================================
 
@@ -331,12 +374,14 @@ if "gpv_compliance_log" not in st.session_state:
 TAB_DEFINITIONS = {
     "dispatcher_tabs": [
         ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"), ("🔌 Графік відключень (ГПВ)", "gpv"),
+        ("📨 Заявки клієнтів", "requests"),
         ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
     ],
     "admin_tabs": [
         ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"), ("🔌 Графік відключень (ГПВ)", "gpv"),
+        ("📨 Заявки клієнтів", "requests"),
         ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
@@ -345,10 +390,13 @@ TAB_DEFINITIONS = {
     ],
     "crm_tabs": [
         ("🏠 Головна", "home"), ("🔌 Графік відключень (ГПВ)", "gpv"),
+        ("📨 Заявки клієнтів", "requests"),
         ("💰 CRM та Білінг", "crm"),
     ],
     "brigade_tabs": [
-        ("🏠 Головна", "home"), ("🔌 Графік відключень (ГПВ)", "gpv"), ("📱 Мобільний клієнт", "mobile"),
+        ("🏠 Головна", "home"), ("🔌 Графік відключень (ГПВ)", "gpv"),
+        ("📨 Заявки клієнтів", "requests"),
+        ("📱 Мобільний клієнт", "mobile"),
     ],
 }
 ROLE_TO_TAB_SET = {
@@ -814,6 +862,156 @@ if "gpv" in tab_map:
                 st.toast("✅ Графік відключень опубліковано на офіційному сайті та в Telegram-каналі!")
         else:
             pub_col3.caption("Публікація доступна диспетчеру/адміністратору.")
+
+# ==========================================
+# 📨 ВКЛАДКА: ЗАЯВКИ КЛІЄНТІВ
+# ==========================================
+if "requests" in tab_map:
+    with tab_map["requests"]:
+        st.title("📨 Заявки та звернення клієнтів")
+        st.caption("Прийом, обробка та призначення бригад за зверненнями споживачів електроенергії.")
+
+        can_manage_requests = user_role in ("dispatcher", "admin", "crm")
+        is_brigade = user_role == "brigade"
+
+        def _sla_status(req):
+            sla_h = REQUEST_PRIORITY_SLA_HOURS.get(req["Пріоритет"], 72)
+            elapsed = (datetime.datetime.now() - req["_created_dt"]).total_seconds() / 3600
+            if req["Статус"] in ("Виконано", "Відхилено"):
+                return "✅ Закрито", "#64748b"
+            if elapsed > sla_h:
+                return f"🔴 Прострочено ({elapsed - sla_h:.0f} год)", "#ef4444"
+            remaining = sla_h - elapsed
+            if remaining < sla_h * 0.25:
+                return f"🟡 {remaining:.0f} год до SLA", "#f59e0b"
+            return f"🟢 {remaining:.0f} год до SLA", "#22c55e"
+
+        # ── KPI ──────────────────────────────────────────────
+        all_reqs = st.session_state.client_requests
+        new_cnt = sum(1 for r in all_reqs if r["Статус"] == "Нова")
+        progress_cnt = sum(1 for r in all_reqs if r["Статус"] in ("В роботі", "Передано бригаді"))
+        done_cnt = sum(1 for r in all_reqs if r["Статус"] == "Виконано")
+        overdue_cnt = sum(1 for r in all_reqs if _sla_status(r)[0].startswith("🔴"))
+
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("🆕 Нових заявок", new_cnt)
+        k2.metric("⏳ В обробці", progress_cnt)
+        k3.metric("✅ Виконано", done_cnt)
+        k4.metric("🚨 Прострочено SLA", overdue_cnt, delta_color="inverse")
+
+        st.markdown("---")
+
+        # ── Форма створення нової заявки ────────────────────
+        with st.expander("➕ Зареєструвати нове звернення", expanded=False):
+            with st.form("new_request_form", clear_on_submit=True):
+                fc1, fc2, fc3 = st.columns(3)
+                req_name = fc1.text_input("ПІБ / Організація:")
+                req_phone = fc2.text_input("Телефон:", placeholder="+380...")
+                req_addr = fc3.text_input("Адреса:")
+                fc4, fc5 = st.columns([1, 2])
+                req_type = fc4.selectbox("Тип звернення:", REQUEST_TYPES)
+                req_priority = fc4.selectbox("Пріоритет:", list(REQUEST_PRIORITY_SLA_HOURS.keys()))
+                req_desc = fc5.text_area("Опис звернення:", height=110)
+                submitted = st.form_submit_button("📨 Зареєструвати заявку", type="primary", use_container_width=True)
+                if submitted:
+                    if req_name.strip() and req_phone.strip() and req_desc.strip():
+                        st.session_state.request_counter += 1
+                        st.session_state.client_requests.insert(0, {
+                            "id": f"REQ-{st.session_state.request_counter}",
+                            "Створено": datetime.datetime.now().strftime("%d.%m.%Y %H:%M"),
+                            "_created_dt": datetime.datetime.now(),
+                            "ПІБ / Організація": req_name.strip(),
+                            "Телефон": req_phone.strip(),
+                            "Адреса": req_addr.strip(),
+                            "Тип звернення": req_type,
+                            "Опис": req_desc.strip(),
+                            "Пріоритет": req_priority,
+                            "Статус": "Нова",
+                            "Бригада": None,
+                            "Коментар диспетчера": "",
+                        })
+                        st.success("✅ Заявку зареєстровано!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Заповніть ПІБ, телефон та опис звернення.")
+
+        # ── Фільтри ──────────────────────────────────────────
+        st.markdown("#### 📋 Реєстр звернень")
+        flt1, flt2, flt3, flt4 = st.columns(4)
+        f_status = flt1.selectbox("Статус:", ["Усі", "Нова", "В роботі", "Передано бригаді", "Виконано", "Відхилено"])
+        f_type = flt2.selectbox("Тип:", ["Усі типи"] + REQUEST_TYPES)
+        f_priority = flt3.selectbox("Пріоритет:", ["Усі"] + list(REQUEST_PRIORITY_SLA_HOURS.keys()))
+        f_search = flt4.text_input("🔍 Пошук (ПІБ/адреса):")
+
+        brigade_names = ["Бригада №1 (ОВБ Центр)", "Бригада №2 (Шаргородська дільниця)"]
+
+        filtered = all_reqs
+        if is_brigade:
+            filtered = [r for r in filtered if r["Бригада"] == current_user["subdivision"]]
+        if f_status != "Усі":
+            filtered = [r for r in filtered if r["Статус"] == f_status]
+        if f_type != "Усі типи":
+            filtered = [r for r in filtered if r["Тип звернення"] == f_type]
+        if f_priority != "Усі":
+            filtered = [r for r in filtered if r["Пріоритет"] == f_priority]
+        if f_search.strip():
+            q = f_search.strip().lower()
+            filtered = [r for r in filtered if q in r["ПІБ / Організація"].lower() or q in r["Адреса"].lower()]
+
+        st.caption(f"Знайдено: {len(filtered)} із {len(all_reqs)} звернень")
+
+        for req in filtered:
+            sla_label, sla_color = _sla_status(req)
+            status_colors = {"Нова": "#38bdf8", "В роботі": "#f59e0b", "Передано бригаді": "#a855f7",
+                              "Виконано": "#22c55e", "Відхилено": "#64748b"}
+            with st.container(border=True):
+                hcol1, hcol2, hcol3 = st.columns([2.2, 1, 1])
+                hcol1.markdown(f"**{req['id']} — {req['ПІБ / Організація']}** · {req['Телефон']}")
+                hcol2.markdown(f"<span style='color:{status_colors.get(req['Статус'],'#64748b')};font-weight:700'>{req['Статус']}</span>", unsafe_allow_html=True)
+                hcol3.markdown(f"<span style='color:{sla_color};font-size:0.85rem'>{sla_label}</span>", unsafe_allow_html=True)
+                st.caption(f"📍 {req['Адреса'] or '—'} · 🏷️ {req['Тип звернення']} · ⚡ Пріоритет: {req['Пріоритет']} · 🕐 {req['Створено']}")
+                st.write(req["Опис"])
+                if req["Бригада"]:
+                    st.markdown(f"🪖 Призначено: **{req['Бригада']}**")
+                if req["Коментар диспетчера"]:
+                    st.info(f"💬 {req['Коментар диспетчера']}")
+
+                if can_manage_requests and req["Статус"] not in ("Виконано", "Відхилено"):
+                    ac1, ac2, ac3, ac4 = st.columns([1.3, 1, 1, 1])
+                    new_brigade = ac1.selectbox("Призначити бригаду:", ["—"] + brigade_names,
+                                                 index=(["—"] + brigade_names).index(req["Бригада"]) if req["Бригада"] in brigade_names else 0,
+                                                 key=f"brig_{req['id']}", label_visibility="collapsed")
+                    if ac2.button("📲 Передати бригаді", key=f"assign_{req['id']}", use_container_width=True):
+                        if new_brigade != "—":
+                            req["Бригада"] = new_brigade
+                            req["Статус"] = "Передано бригаді"
+                            st.toast(f"✅ Заявку {req['id']} передано: {new_brigade}")
+                            st.rerun()
+                        else:
+                            st.warning("Оберіть бригаду перед призначенням.")
+                    if ac3.button("✅ Закрити (виконано)", key=f"done_{req['id']}", use_container_width=True):
+                        req["Статус"] = "Виконано"
+                        st.rerun()
+                    if ac4.button("⛔ Відхилити", key=f"reject_{req['id']}", use_container_width=True):
+                        req["Статус"] = "Відхилено"
+                        st.rerun()
+                    comment_val = st.text_input("Коментар диспетчера:", value=req["Коментар диспетчера"],
+                                                 key=f"comment_{req['id']}")
+                    if comment_val != req["Коментар диспетчера"]:
+                        req["Коментар диспетчера"] = comment_val
+                elif is_brigade and req["Статус"] == "Передано бригаді":
+                    if st.button("✅ Підтвердити виконання", key=f"bdone_{req['id']}", use_container_width=True):
+                        req["Статус"] = "Виконано"
+                        st.toast("✅ Звернення позначено виконаним!")
+                        st.rerun()
+
+        # ── Експорт ──────────────────────────────────────────
+        if can_manage_requests:
+            st.markdown("---")
+            export_df = pd.DataFrame([{k: v for k, v in r.items() if k != "_created_dt"} for r in all_reqs])
+            st.download_button("📥 Завантажити реєстр заявок (.csv)",
+                                data=export_df.to_csv(index=False).encode("utf-8"),
+                                file_name="client_requests.csv", mime="text/csv")
 
 # ==========================================
 # ВКЛАДКА: МОБІЛЬНИЙ КЛІЄНТ
