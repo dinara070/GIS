@@ -6,6 +6,7 @@ import json
 import io
 import datetime
 import random as _rnd
+import time
 
 try:
     import folium
@@ -307,6 +308,20 @@ if "crm_debtors" not in st.session_state:
         })
 
 # ==========================================
+# 📐 GIS EDITOR — ІНІЦІАЛІЗАЦІЯ ДАНИХ
+# ==========================================
+GIS_OBJECT_TYPES = ["Опора", "Підстанція", "Центр клієнтів"]
+GIS_STATUS_OPTIONS = ["Нормальна", "Попередження", "АВАРІЯ"]
+GIS_CRITICALITY_OPTIONS = ["Низька", "Середня", "Висока", "Критична"]
+
+if "gis_pending_point" not in st.session_state:
+    st.session_state.gis_pending_point = None
+if "gis_object_counter" not in st.session_state:
+    st.session_state.gis_object_counter = len(st.session_state.objects)
+if "gis_edit_log" not in st.session_state:
+    st.session_state.gis_edit_log = []
+
+# ==========================================
 # ГОЛОВНЕ МЕНЮ
 # ==========================================
 TAB_DEFINITIONS = {
@@ -319,6 +334,7 @@ TAB_DEFINITIONS = {
     ],
     "admin_tabs": [
         ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"),
+        ("📐 GIS Editor", "gis_editor"),
         ("📨 Заявки клієнтів", "requests"),
         ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
@@ -500,6 +516,7 @@ if "home" in tab_map:
             st.markdown("### 🧩 Функціональні модулі системи")
             modules = [
                 ("🗺️","Диспетчер ГІС-мапи","Інтерактивна Folium-карта з шарами ЛЕП, зонами СО та кольоровими маркерами аварій."),
+                ("📐","GIS Editor","Додавання нових об'єктів мережі (опор, ТП) прямо на мапі кліком, без звернення до ІТ-відділу."),
                 ("🔌","Графік відключень (ГПВ)","Управління черговими графіками погодинних відключень за рівнями обмежень Укренерго, пошук черги за адресою, журнал виконання."),
                 ("📱","Мобільний клієнт бригади","Цифровий наряд-допуск для виїзних бригад: чек-лист безпеки, звіт про виконану роботу."),
                 ("🌡️","SmartGrid AI — Аналітика","Симуляція навантаження залежно від температури (-20°C…+40°C), детекція аномалій напруги, Threshold Alerts."),
@@ -637,6 +654,157 @@ if "map" in tab_map:
             st.download_button(label="📄 Завантажити Наряд-Допуск (.txt)",
                                data=permit_text, file_name=f"permit_{obj.get('name','TP')}.txt",
                                mime="text/plain", use_container_width=True)
+
+# ==========================================
+# 📐 ВКЛАДКА: GIS EDITOR (тільки Адмін)
+# ==========================================
+if "gis_editor" in tab_map:
+    with tab_map["gis_editor"]:
+        st.title("📐 Кабінет адміністратора ГІС — GIS Editor")
+        st.markdown("""
+        Раніше координати об'єктів мережі були жорстко «зашиті» в код застосунку — щоб додати
+        нову опору чи ТП, потрібно було звертатись до розробника. Тепер диспетчер/адміністратор
+        може **клікнути прямо на мапі**, і система сама підставить координати в форму створення
+        нового об'єкта.
+        """)
+        st.info(
+            "ℹ️ **Як це працює:** повноцінне контекстне меню по правому кліку браузери в iframe-картах "
+            "(Folium/Leaflet у Streamlit) надійно не відкривають — тому тут використано рівноцінний і "
+            "надійніший робочий процес **«клік → форма»**: клікніть по мапі в потрібній точці, "
+            "координати автоматично підхоплюються нижче, і ви одразу заповнюєте картку нового об'єкта."
+        )
+
+        if not FOLIUM_AVAILABLE:
+            st.warning("⚠️ Бібліотеки `folium` та `streamlit-folium` не встановлені. Виконайте: `pip install folium streamlit-folium`")
+        else:
+            col_editor_map, col_editor_form = st.columns([1.6, 1])
+
+            with col_editor_map:
+                st.markdown("##### 🖱️ Клікніть на мапі, щоб обрати місце нового об'єкта")
+                editor_map = build_folium_map(st.session_state.objects, ["Об'єкти", "ЛЕП", "Зони СО"])
+                editor_result = st_folium(
+                    editor_map, width="100%", height=520,
+                    returned_objects=["last_clicked"], key="gis_editor_map"
+                )
+                clicked = (editor_result or {}).get("last_clicked")
+                if clicked and clicked.get("lat") is not None:
+                    st.session_state.gis_pending_point = {
+                        "lat": round(clicked["lat"], 5),
+                        "lon": round(clicked["lng"], 5),
+                    }
+
+                if st.session_state.gis_pending_point:
+                    pt = st.session_state.gis_pending_point
+                    st.success(f"📍 Обрано точку: **{pt['lat']:.5f}° N, {pt['lon']:.5f}° E** — заповніть картку праворуч.")
+                else:
+                    st.caption("Точку ще не обрано — клікніть будь-де на карті вище.")
+
+            with col_editor_form:
+                st.markdown("##### ➕ Створити новий об'єкт")
+                pt = st.session_state.gis_pending_point
+                with st.form("gis_new_object_form", clear_on_submit=False):
+                    new_lat = st.number_input(
+                        "Широта (N):", value=float(pt["lat"]) if pt else 49.2331,
+                        format="%.5f", step=0.0001
+                    )
+                    new_lon = st.number_input(
+                        "Довгота (E):", value=float(pt["lon"]) if pt else 28.4682,
+                        format="%.5f", step=0.0001
+                    )
+                    new_type = st.selectbox("Тип об'єкта:", GIS_OBJECT_TYPES)
+                    new_name = st.text_input(
+                        "Назва об'єкта:",
+                        placeholder="напр. Оп. №57 або ТП-301",
+                    )
+                    new_status = st.selectbox("Поточний статус:", GIS_STATUS_OPTIONS)
+                    new_criticality = st.selectbox("Критичність вузла:", GIS_CRITICALITY_OPTIONS, index=1)
+                    new_subdivision = st.selectbox(
+                        "Підпорядкування (СО):", list(st.session_state.org_structure.keys())
+                    )
+                    new_desc = st.text_area("Опис / технічні параметри:", height=90,
+                                             placeholder="напр. ВН-10 кВ, встановлено 2026 р.")
+                    col_submit, col_clear = st.columns(2)
+                    submitted_new_obj = col_submit.form_submit_button(
+                        "✅ Додати об'єкт на мапу", type="primary", use_container_width=True
+                    )
+                    cleared_point = col_clear.form_submit_button(
+                        "🗑️ Скинути обрану точку", use_container_width=True
+                    )
+
+                if cleared_point:
+                    st.session_state.gis_pending_point = None
+                    st.rerun()
+
+                if submitted_new_obj:
+                    if not new_name.strip():
+                        st.error("❌ Вкажіть назву об'єкта.")
+                    elif any(o["name"].strip().lower() == new_name.strip().lower() for o in st.session_state.objects):
+                        st.error("❌ Об'єкт з такою назвою вже існує. Оберіть іншу назву.")
+                    else:
+                        new_object = {
+                            "name": new_name.strip(),
+                            "type": new_type,
+                            "status": new_status,
+                            "desc": new_desc.strip() or "Опис не вказано.",
+                            "latitude": round(float(new_lat), 5),
+                            "longitude": round(float(new_lon), 5),
+                            "criticality": new_criticality,
+                            "subdivision": new_subdivision,
+                        }
+                        st.session_state.objects.append(new_object)
+                        st.session_state.gis_object_counter += 1
+                        st.session_state.gis_pending_point = None
+
+                        now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
+                        st.session_state.log_data.insert(0, {
+                            "Час": now_str, "Тип": "Інспекція",
+                            "Об'єкт": new_object["name"],
+                            "Опис": f"[{current_user['display_name']}] 📐 GIS Editor: створено новий об'єкт «{new_object['name']}» ({new_object['type']}) на координатах {new_object['latitude']:.5f}° N, {new_object['longitude']:.5f}° E.",
+                            "Критичність": new_criticality
+                        })
+                        st.session_state.gis_edit_log.insert(0, {
+                            "Час": now_str,
+                            "Дія": "Створення",
+                            "Об'єкт": new_object["name"],
+                            "Тип": new_object["type"],
+                            "Координати": f"{new_object['latitude']:.5f}, {new_object['longitude']:.5f}",
+                            "Автор": current_user["display_name"],
+                        })
+                        st.success(f"✅ Об'єкт «{new_object['name']}» додано на мапу!")
+                        st.rerun()
+
+        st.markdown("---")
+        col_list, col_audit = st.columns([1.3, 1])
+
+        with col_list:
+            st.markdown("##### 📋 Усі об'єкти мережі (редагування / видалення)")
+            for idx, o in enumerate(st.session_state.objects):
+                with st.container(border=True):
+                    hc1, hc2, hc3 = st.columns([2, 1, 0.6])
+                    hc1.markdown(f"**{o['name']}** · {o['type']}")
+                    hc2.caption(f"{o['latitude']:.4f}° N, {o['longitude']:.4f}° E")
+                    if hc3.button("🗑️", key=f"gis_del_{idx}_{o['name']}", help="Видалити об'єкт"):
+                        removed = st.session_state.objects.pop(idx)
+                        now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
+                        st.session_state.gis_edit_log.insert(0, {
+                            "Час": now_str, "Дія": "Видалення",
+                            "Об'єкт": removed["name"], "Тип": removed["type"],
+                            "Координати": f"{removed['latitude']:.5f}, {removed['longitude']:.5f}",
+                            "Автор": current_user["display_name"],
+                        })
+                        st.toast(f"🗑️ Об'єкт «{removed['name']}» видалено.")
+                        st.rerun()
+
+        with col_audit:
+            st.markdown("##### 🕓 Журнал редагувань GIS")
+            if st.session_state.gis_edit_log:
+                st.dataframe(pd.DataFrame(st.session_state.gis_edit_log),
+                             use_container_width=True, hide_index=True, height=340)
+                audit_csv = pd.DataFrame(st.session_state.gis_edit_log).to_csv(index=False).encode("utf-8")
+                st.download_button("📥 Завантажити журнал GIS (.csv)", data=audit_csv,
+                                   file_name="gis_editor_log.csv", mime="text/csv", use_container_width=True)
+            else:
+                st.caption("Ще немає жодної зміни в цій сесії.")
 
 # ==========================================
 # 📨 ВКЛАДКА: ЗАЯВКИ КЛІЄНТІВ
