@@ -299,21 +299,21 @@ if "request_counter" not in st.session_state:
 # Райони / дільниці та їх координати (центроїди для теплової карти)
 CRM_DISTRICTS = [
     {"id": "vinnytsia_city",  "name": "Вінниця міська",     "so": "СО «Вінницькі міські ЕМ»",       "lat": 49.233, "lon": 28.468,
-     "consumers_total": 124500, "consumers_paid": 108200, "debt_uah": 4_820_000, "consumption_kwh": 18_450_000},
+     "consumers_total": 124500, "consumers_paid": 108200, "debt_uah": 4_820_000, "consumption_kwh": 18_450_000, "released_kwh": 19_630_000},
     {"id": "vinnytsia_cent",  "name": "Вінницька центр.",    "so": "СО «Вінницькі центральні ЕМ»",   "lat": 49.320, "lon": 28.560,
-     "consumers_total": 38400,  "consumers_paid": 33100,  "debt_uah": 2_150_000, "consumption_kwh": 6_200_000},
+     "consumers_total": 38400,  "consumers_paid": 33100,  "debt_uah": 2_150_000, "consumption_kwh": 6_200_000, "released_kwh": 6_530_000},
     {"id": "vinnytsia_east",  "name": "Вінницька східна",    "so": "СО «Вінницькі східні ЕМ»",       "lat": 49.105, "lon": 29.100,
-     "consumers_total": 41200,  "consumers_paid": 34800,  "debt_uah": 3_670_000, "consumption_kwh": 7_100_000},
+     "consumers_total": 41200,  "consumers_paid": 34800,  "debt_uah": 3_670_000, "consumption_kwh": 7_100_000, "released_kwh": 7_630_000},
     {"id": "haisyn",          "name": "Гайсинська",          "so": "СО «Гайсинські ЕМ»",             "lat": 48.810, "lon": 29.380,
-     "consumers_total": 29800,  "consumers_paid": 21400,  "debt_uah": 5_940_000, "consumption_kwh": 5_050_000},
+     "consumers_total": 29800,  "consumers_paid": 21400,  "debt_uah": 5_940_000, "consumption_kwh": 5_050_000, "released_kwh": 5_870_000},
     {"id": "zhmerynka",       "name": "Жмеринська + Шаргород", "so": "СО «Жмеринські ЕМ»",          "lat": 48.900, "lon": 28.100,
-     "consumers_total": 33600,  "consumers_paid": 30100,  "debt_uah": 1_820_000, "consumption_kwh": 5_700_000},
+     "consumers_total": 33600,  "consumers_paid": 30100,  "debt_uah": 1_820_000, "consumption_kwh": 5_700_000, "released_kwh": 6_060_000},
     {"id": "khmilnyk",        "name": "Хмільницька",         "so": "СО «Хмільницькі ЕМ»",           "lat": 49.560, "lon": 27.950,
-     "consumers_total": 27100,  "consumers_paid": 23400,  "debt_uah": 2_310_000, "consumption_kwh": 4_600_000},
+     "consumers_total": 27100,  "consumers_paid": 23400,  "debt_uah": 2_310_000, "consumption_kwh": 4_600_000, "released_kwh": 4_840_000},
     {"id": "mohyliv",         "name": "Могилів-Подільська",  "so": "СО «Могилів-Подільські ЕМ»",    "lat": 48.450, "lon": 27.800,
-     "consumers_total": 24900,  "consumers_paid": 19800,  "debt_uah": 4_480_000, "consumption_kwh": 4_200_000},
+     "consumers_total": 24900,  "consumers_paid": 19800,  "debt_uah": 4_480_000, "consumption_kwh": 4_200_000, "released_kwh": 4_830_000},
     {"id": "tulchyn",         "name": "Тульчинська",         "so": "СО «Тульчинські ЕМ»",           "lat": 48.670, "lon": 28.840,
-     "consumers_total": 22300,  "consumers_paid": 19700,  "debt_uah": 1_960_000, "consumption_kwh": 3_800_000},
+     "consumers_total": 22300,  "consumers_paid": 19700,  "debt_uah": 1_960_000, "consumption_kwh": 3_800_000, "released_kwh": 4_040_000},
 ]
 
 # Тарифи (грн/кВт·год) — двозонний та тризонний лічильник (2026)
@@ -323,6 +323,10 @@ TARIFF_NIGHT   = 2.16   # двозонний ніч     (23:00–07:00)
 TARIFF_PEAK    = 7.01   # тризонний пік     (08:00–11:00, 20:00–22:00)
 TARIFF_SEMI    = 4.32   # тризонний напівпік
 TARIFF_VALLEY  = 2.16   # тризонний ніч/провал
+
+# Поріг нетехнічних втрат: якщо розрив між "Відпущено в мережу" та "Спожито" по дільниці
+# перевищує це значення — це тригер для позапланової перевірки (крадіжки / несправні лічильники).
+ENERGY_LOSS_TRIGGER_PCT = 10.0
 
 # Місячна динаміка платежів (% сплачено до кінця кожного місяця)
 MONTHS_SHORT = ["Січ", "Лют", "Бер", "Кві", "Тра", "Чер",
@@ -336,6 +340,18 @@ if "crm_monthly_pay" not in st.session_state:
     st.session_state.crm_monthly_pay = {d["id"]: _gen_monthly_pay_pct(
         d["consumers_paid"] / d["consumers_total"] * 100
     ) for d in CRM_DISTRICTS}
+
+_rnd.seed(2077)
+
+def _gen_monthly_loss_pct(base_pct):
+    return [max(1.5, min(28.0, base_pct + _rnd.uniform(-2.2, 2.2))) for _ in range(12)]
+
+if "crm_monthly_loss" not in st.session_state:
+    st.session_state.crm_monthly_loss = {
+        d["id"]: _gen_monthly_loss_pct(
+            round((d["released_kwh"] - d["consumption_kwh"]) / d["released_kwh"] * 100, 2)
+        ) for d in CRM_DISTRICTS
+    }
 
 # Категорії боржників
 DEBTOR_CATEGORIES = ["Населення", "Бюджетні орг.", "Підприємства", "ОСББ / ЖКГ", "Агросектор"]
@@ -496,6 +512,7 @@ TAB_DEFINITIONS = {
         ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
         ("🧠 Інтелектуальна діагностика", "diagnostics"),
+        ("⚖️ Енергобаланс", "energy_balance"),
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
     ],
     "admin_tabs": [
@@ -507,6 +524,7 @@ TAB_DEFINITIONS = {
         ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
         ("🧠 Інтелектуальна діагностика", "diagnostics"),
+        ("⚖️ Енергобаланс", "energy_balance"),
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
         ("💰 CRM та Білінг", "crm"),
         ("💾 Data Центр", "data"), ("👥 Управління доступом", "users"),
@@ -515,6 +533,7 @@ TAB_DEFINITIONS = {
         ("🏠 Головна", "home"),
         ("📨 Заявки клієнтів", "requests"),
         ("💰 CRM та Білінг", "crm"),
+        ("⚖️ Енергобаланс", "energy_balance"),
     ],
     "brigade_tabs": [
         ("🏠 Головна", "home"),
@@ -2502,6 +2521,177 @@ if "crm" in tab_map:
             if st.button("🔄 Оновити дані CRM", use_container_width=True):
                 st.toast("✅ Дані CRM оновлено з бази!")
                 st.rerun()
+
+# ==========================================
+# ⚖️ ВКЛАДКА: ВІЗУАЛІЗАЦІЯ ЕНЕРГОБАЛАНСУ (ENERGY BALANCE)
+# ==========================================
+if "energy_balance" in tab_map:
+    with tab_map["energy_balance"]:
+        st.title("⚖️ Візуалізація енергобалансу")
+        st.caption(
+            "Порівняння «Відпущено в мережу» та «Спожито споживачами» (за показниками обліку) по кожній "
+            "дільниці. Розрив між ними — нетехнічні втрати: крадіжки електроенергії або несправні "
+            f"лічильники. Розрив понад {ENERGY_LOSS_TRIGGER_PCT:.0f}% — тригер для негайної перевірки обліку."
+        )
+
+        balance_rows = []
+        for d in CRM_DISTRICTS:
+            released = d["released_kwh"]
+            consumed = d["consumption_kwh"]
+            loss_kwh = released - consumed
+            loss_pct = round(loss_kwh / released * 100, 2) if released else 0.0
+            if loss_pct > ENERGY_LOSS_TRIGGER_PCT:
+                status_label, status_color = "🔴 Критичний розрив", "#ef4444"
+            elif loss_pct > ENERGY_LOSS_TRIGGER_PCT * 0.6:
+                status_label, status_color = "🟡 Підвищені втрати", "#f59e0b"
+            else:
+                status_label, status_color = "🟢 Технічна норма", "#22c55e"
+            balance_rows.append({
+                "id": d["id"], "Дільниця": d["name"], "СО": d["so"],
+                "Відпущено, кВт·год": released, "Спожито, кВт·год": consumed,
+                "Втрати, кВт·год": loss_kwh, "Втрати, %": loss_pct,
+                "Статус": status_label, "_color": status_color,
+            })
+
+        total_released = sum(r["Відпущено, кВт·год"] for r in balance_rows)
+        total_consumed = sum(r["Спожито, кВт·год"] for r in balance_rows)
+        total_loss_kwh = total_released - total_consumed
+        total_loss_pct = round(total_loss_kwh / total_released * 100, 2)
+        critical_districts = [r for r in balance_rows if r["Статус"] == "🔴 Критичний розрив"]
+        warn_districts = [r for r in balance_rows if r["Статус"] == "🟡 Підвищені втрати"]
+
+        ek1, ek2, ek3, ek4 = st.columns(4)
+        ek1.metric("⚡ Відпущено в мережу", f"{total_released/1_000_000:.1f} млн кВт·год")
+        ek2.metric("🏠 Спожито споживачами", f"{total_consumed/1_000_000:.1f} млн кВт·год")
+        ek3.metric("📉 Загальні втрати", f"{total_loss_pct}%", f"{total_loss_kwh/1_000_000:.2f} млн кВт·год", delta_color="inverse")
+        ek4.metric("🔴 Дільниць з критичним розривом", len(critical_districts), delta_color="inverse")
+
+        if critical_districts:
+            crit_names = ", ".join(r["Дільниця"] for r in critical_districts)
+            st.error(
+                f"🚨 Виявлено розрив балансу понад {ENERGY_LOSS_TRIGGER_PCT:.0f}% по дільницях: **{crit_names}**. "
+                "Ймовірні причини: несанкціоноване підключення, крадіжки електроенергії або несправні прилади обліку. "
+                "Рекомендовано негайну перевірку обліку на місці."
+            )
+        elif warn_districts:
+            st.warning(f"⚠️ {len(warn_districts)} дільниць(і) мають підвищені втрати — варто взяти на контроль.")
+        else:
+            st.success("✅ У всіх дільницях розрив балансу в межах технічної норми.")
+
+        st.markdown("---")
+
+        # ── Графік балансу по дільницях ──────────────────────
+        st.markdown("#### 📊 Баланс «Відпущено vs Спожито» по дільницях")
+        dist_labels = [r["Дільниця"].replace("СО «", "").replace("»", "") for r in balance_rows]
+        released_vals = [r["Відпущено, кВт·год"] / 1_000_000 for r in balance_rows]
+        consumed_vals = [r["Спожито, кВт·год"] / 1_000_000 for r in balance_rows]
+        bar_colors_loss = [r["_color"] for r in balance_rows]
+
+        fig_bal, ax_bal = plt.subplots(figsize=(11, 4.2))
+        fig_bal.patch.set_facecolor("#0f172a")
+        ax_bal.set_facecolor("#1e293b")
+        x_pos = np.arange(len(dist_labels))
+        bar_w = 0.35
+        ax_bal.bar(x_pos - bar_w/2, released_vals, width=bar_w, color="#38bdf8", label="Відпущено в мережу", edgecolor="#0f172a")
+        bars_consumed = ax_bal.bar(x_pos + bar_w/2, consumed_vals, width=bar_w, color=bar_colors_loss, label="Спожито (за облік.)", edgecolor="#0f172a")
+        for i, r in enumerate(balance_rows):
+            ax_bal.text(x_pos[i], max(released_vals[i], consumed_vals[i]) + 0.3,
+                        f"{r['Втрати, %']}%", ha="center", color=r["_color"], fontsize=8, fontweight="bold")
+        ax_bal.set_xticks(x_pos)
+        ax_bal.set_xticklabels(dist_labels, color="#94a3b8", fontsize=7.5, rotation=20)
+        ax_bal.tick_params(colors="#94a3b8", labelsize=8, axis="y")
+        ax_bal.set_ylabel("млн кВт·год / місяць", color="#64748b", fontsize=8)
+        ax_bal.spines[:].set_color("#334155")
+        ax_bal.grid(True, alpha=0.1, color="#334155", axis="y")
+        ax_bal.legend(fontsize=8, facecolor="#1e293b", edgecolor="#334155", labelcolor="#cbd5e1")
+        ax_bal.set_title("Підпис над стовпчиками — % нетехнічних втрат (колір = рівень тригера)", color="#64748b", fontsize=8.5)
+        plt.tight_layout()
+        st.pyplot(fig_bal)
+        plt.close(fig_bal)
+
+        # ── Таблиця балансу ───────────────────────────────────
+        st.markdown("#### 📋 Деталізація балансу по дільницях")
+        balance_display_df = pd.DataFrame([{
+            "Дільниця": r["Дільниця"],
+            "Відпущено, кВт·год": r["Відпущено, кВт·год"],
+            "Спожито, кВт·год": r["Спожито, кВт·год"],
+            "Втрати, кВт·год": r["Втрати, кВт·год"],
+            "Втрати, %": r["Втрати, %"],
+            "Статус": r["Статус"],
+        } for r in balance_rows])
+
+        def _color_balance_status(val):
+            colors = {"🔴 Критичний розрив": "#ef4444", "🟡 Підвищені втрати": "#f59e0b", "🟢 Технічна норма": "#22c55e"}
+            return f"color: {colors.get(val, '#94a3b8')}; font-weight: bold"
+
+        st.dataframe(balance_display_df.style.map(_color_balance_status, subset=["Статус"]),
+                     use_container_width=True, hide_index=True)
+
+        # ── Динаміка втрат за 12 місяців ──────────────────────
+        st.markdown("#### 📈 Динаміка втрат (12 місяців)")
+        selected_loss_districts = st.multiselect(
+            "Оберіть дільниці для порівняння:",
+            options=[d["name"] for d in CRM_DISTRICTS],
+            default=[r["Дільниця"] for r in critical_districts] or [CRM_DISTRICTS[0]["name"]],
+            key="energy_balance_district_select"
+        )
+        fig_loss_trend, ax_loss_trend = plt.subplots(figsize=(9, 3.6))
+        fig_loss_trend.patch.set_facecolor("#0f172a")
+        ax_loss_trend.set_facecolor("#1e293b")
+        palette_loss = ["#38bdf8", "#a855f7", "#10b981", "#f59e0b", "#f87171", "#34d399", "#60a5fa", "#fbbf24"]
+        for i, d in enumerate(CRM_DISTRICTS):
+            if d["name"] in selected_loss_districts:
+                monthly_loss = st.session_state.crm_monthly_loss[d["id"]]
+                ax_loss_trend.plot(MONTHS_SHORT, monthly_loss, marker="o", markersize=4,
+                                    linewidth=2, color=palette_loss[i % len(palette_loss)], label=d["name"][:20])
+        ax_loss_trend.axhline(y=ENERGY_LOSS_TRIGGER_PCT, color="#ef4444", linestyle="--", linewidth=1.2,
+                               alpha=0.8, label=f"Тригер {ENERGY_LOSS_TRIGGER_PCT:.0f}%")
+        ax_loss_trend.set_ylabel("Втрати, %", color="#64748b", fontsize=8)
+        ax_loss_trend.tick_params(colors="#94a3b8", labelsize=8)
+        ax_loss_trend.spines[:].set_color("#334155")
+        ax_loss_trend.legend(fontsize=7, facecolor="#1e293b", edgecolor="#334155", labelcolor="#cbd5e1", loc="upper left")
+        ax_loss_trend.grid(True, alpha=0.1, color="#334155")
+        plt.tight_layout()
+        st.pyplot(fig_loss_trend)
+        plt.close(fig_loss_trend)
+
+        # ── Ініціювання позапланової перевірки (диспетчер/адмін) ──
+        if user_role in ("dispatcher", "admin") and (critical_districts or warn_districts):
+            st.markdown("---")
+            st.markdown("#### 🕵️ Ініціювати позапланову перевірку обліку")
+            trigger_options = [r["Дільниця"] for r in (critical_districts + warn_districts)]
+            trigger_district = st.selectbox("Дільниця для перевірки:", trigger_options, key="energy_trigger_district")
+            trigger_row = next(r for r in balance_rows if r["Дільниця"] == trigger_district)
+            if st.button("🚨 Створити наряд на позапланову перевірку обліку", type="primary", use_container_width=True):
+                now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
+                st.session_state.log_data.insert(0, {
+                    "Час": now_str, "Тип": "Інспекція",
+                    "Об'єкт": f"Дільниця: {trigger_district}",
+                    "Опис": (
+                        f"[{current_user['display_name']}] ⚖️ Виявлено розрив енергобалансу "
+                        f"{trigger_row['Втрати, %']}% (відпущено {trigger_row['Відпущено, кВт·год']:,} кВт·год, "
+                        f"спожито {trigger_row['Спожито, кВт·год']:,} кВт·год). Ініційовано позапланову перевірку "
+                        f"приладів обліку та можливих несанкціонованих підключень."
+                    ).replace(",", "ʼ"),
+                    "Критичність": "Критична" if trigger_row["Статус"] == "🔴 Критичний розрив" else "Висока"
+                })
+                st.success(f"✅ Наряд на перевірку обліку по дільниці «{trigger_district}» створено та додано до журналу подій.")
+                st.rerun()
+
+        st.markdown("---")
+        balance_csv = balance_display_df.to_csv(index=False).encode("utf-8")
+        st.download_button("📥 Завантажити звіт енергобалансу (.csv)", data=balance_csv,
+                           file_name="energy_balance_report.csv", mime="text/csv")
+
+        with st.expander("ℹ️ Як читати цей звіт"):
+            st.markdown(f"""
+            * **Відпущено в мережу** — обсяг електроенергії, поданої в мережу дільниці (за показниками ТП/фідерів).
+            * **Спожито споживачами** — сумарні показники комерційного обліку (лічильники споживачів).
+            * **Втрати** = Відпущено − Спожито. Частина втрат є технічною нормою (нагрів провідників, трансформатори) — зазвичай до {ENERGY_LOSS_TRIGGER_PCT*0.6:.0f}%.
+            * Розрив, що перевищує **{ENERGY_LOSS_TRIGGER_PCT:.0f}%**, вказує на ймовірні **нетехнічні втрати**:
+              несанкціоновані підключення, розкрадання електроенергії або масові несправності лічильників —
+              і є прямим тригером для позапланової перевірки обліку на дільниці.
+            """)
 
 # ==========================================
 # ВКЛАДКА: ЖУРНАЛ ПОДІЙ
