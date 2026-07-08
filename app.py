@@ -367,6 +367,110 @@ if "crm_debtors" not in st.session_state:
         })
 
 # ==========================================
+# 📦 РЕСУРСНИЙ МЕНЕДЖМЕНТ (ASSET & INVENTORY) — ІНІЦІАЛІЗАЦІЯ ДАНИХ
+# ==========================================
+ASSET_CATALOG = [
+    ("Ізолятори", "шт"),
+    ("Силові запобіжники", "шт"),
+    ("Силові трансформатори", "шт"),
+    ("Кабель ВН (10-35 кВ)", "м"),
+    ("Кабель НН (0.4 кВ)", "м"),
+    ("Опори залізобетонні", "шт"),
+    ("Роз'єднувачі", "шт"),
+    ("Кабельні муфти", "шт"),
+    ("Засоби захисту (ЗІЗ)", "компл."),
+]
+
+# Категорії обладнання, релевантні для кожного типу об'єкта мережі.
+# Використовується для автоматичної перевірки складу при реєстрації аварії.
+OBJECT_TYPE_REQUIRED_ASSETS = {
+    "Підстанція": ["Силові запобіжники", "Силові трансформатори", "Роз'єднувачі"],
+    "Опора": ["Ізолятори", "Опори залізобетонні", "Кабель ВН (10-35 кВ)"],
+    "Центр клієнтів": [],
+}
+
+if "inventory" not in st.session_state:
+    _rnd.seed(2026)
+    st.session_state.inventory = []
+    _inv_id = 0
+    for _so_name in st.session_state.org_structure.keys():
+        for _item_name, _unit in ASSET_CATALOG:
+            _inv_id += 1
+            _min_threshold = _rnd.choice([3, 5, 8, 10])
+            _qty = _rnd.randint(2, 40)
+            st.session_state.inventory.append({
+                "id": f"INV-{_inv_id:04d}",
+                "СО": _so_name,
+                "Найменування": _item_name,
+                "Одиниця": _unit,
+                "Кількість": _qty,
+                "Мін. запас": _min_threshold,
+            })
+    # Навмисно занулюємо силові запобіжники на складі Жмеринських ЕМ (охоплює Шаргородську
+    # дільницю) — демонстраційний сценарій «Увага: немає в наявності» при реєстрації аварії.
+    for _inv_item in st.session_state.inventory:
+        if _inv_item["СО"] == "СО «Жмеринські ЕМ»" and _inv_item["Найменування"] == "Силові запобіжники":
+            _inv_item["Кількість"] = 0
+        if _inv_item["СО"] == "СО «Вінницькі міські ЕМ»" and _inv_item["Найменування"] == "Силові трансформатори":
+            _inv_item["Кількість"] = 1
+
+if "inventory_counter" not in st.session_state:
+    st.session_state.inventory_counter = len(st.session_state.inventory)
+
+if "gis_last_stock_check" not in st.session_state:
+    st.session_state.gis_last_stock_check = None
+
+def get_stock_status(qty, min_threshold):
+    if qty <= 0:
+        return "🔴 Немає в наявності", "#ef4444"
+    if qty < min_threshold:
+        return "🟡 Низький запас", "#f59e0b"
+    return "🟢 Норма", "#22c55e"
+
+def get_inventory_for_subdivision(subdivision):
+    return [i for i in st.session_state.inventory if i["СО"] == subdivision]
+
+def check_stock_warnings_for_object(obj):
+    """Перевіряє наявність ключових запчастин на складі підпорядкування об'єкта,
+    релевантних його типу (напр. для 'Підстанція' — силові запобіжники, трансформатори)."""
+    subdivision = obj.get("subdivision")
+    obj_type = obj.get("type")
+    required_categories = OBJECT_TYPE_REQUIRED_ASSETS.get(obj_type, [])
+    warnings = []
+    if not subdivision or not required_categories:
+        return warnings
+    sub_inventory = get_inventory_for_subdivision(subdivision)
+    for cat in required_categories:
+        match = next((i for i in sub_inventory if i["Найменування"] == cat), None)
+        if match is None:
+            continue
+        label, color = get_stock_status(match["Кількість"], match["Мін. запас"])
+        if label != "🟢 Норма":
+            warnings.append({
+                "item": cat, "qty": match["Кількість"], "unit": match["Одиниця"],
+                "min": match["Мін. запас"], "label": label, "color": color,
+                "subdivision": subdivision,
+            })
+    return warnings
+
+def render_stock_warnings(warnings, context_label=""):
+    """Відображає попередження про дефіцит запчастин у форматі st.error/st.warning."""
+    if not warnings:
+        st.success(f"✅ Перевірка складу{(' — ' + context_label) if context_label else ''}: необхідні запчастини в наявності.")
+        return
+    for w in warnings:
+        if w["label"] == "🔴 Немає в наявності":
+            st.error(
+                f"🚨 Увага: на складі **{w['subdivision']}** немає в наявності «{w['item']}» "
+                f"(0 {w['unit']}, потрібно мін. {w['min']} {w['unit']})."
+            )
+        else:
+            st.warning(
+                f"⚠️ Низький запас на складі **{w['subdivision']}**: «{w['item']}» — "
+                f"{w['qty']} {w['unit']} (мін. {w['min']} {w['unit']})."
+            )
+
+# ==========================================
 # 📐 GIS EDITOR — ІНІЦІАЛІЗАЦІЯ ДАНИХ
 # ==========================================
 GIS_OBJECT_TYPES = ["Опора", "Підстанція", "Центр клієнтів"]
@@ -386,6 +490,7 @@ if "gis_edit_log" not in st.session_state:
 TAB_DEFINITIONS = {
     "dispatcher_tabs": [
         ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"),
+        ("📦 Ресурси (Склад)", "assets"),
         ("📨 Заявки клієнтів", "requests"),
         ("🚨 Сповіщення", "notifications"),
         ("📱 Мобільний клієнт", "mobile"),
@@ -395,6 +500,7 @@ TAB_DEFINITIONS = {
     "admin_tabs": [
         ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"),
         ("📐 GIS Editor", "gis_editor"),
+        ("📦 Ресурси (Склад)", "assets"),
         ("📨 Заявки клієнтів", "requests"),
         ("🚨 Сповіщення", "notifications"),
         ("📱 Мобільний клієнт", "mobile"),
@@ -693,6 +799,9 @@ if "map" in tab_map:
             st.markdown(f"**Важливість вузла:** `{criticality}`")
             st.markdown(f"**Координати:** `{obj.get('latitude',0.0):.4f}° N, {obj.get('longitude',0.0):.4f}° E`")
             st.markdown(f"**Технічні параметри:** {obj.get('desc','Немає опису')}")
+            if "АВАРІЯ" in status:
+                st.markdown("**📦 Забезпеченість складу для ліквідації аварії:**")
+                render_stock_warnings(check_stock_warnings_for_object(obj))
             st.divider()
             st.markdown("🎛️ **Команди дистанційного керування:**")
             if st.button("⚡ Вимкнути фідер (SCADA)", use_container_width=True):
@@ -735,6 +844,12 @@ if "gis_editor" in tab_map:
             "надійніший робочий процес **«клік → форма»**: клікніть по мапі в потрібній точці, "
             "координати автоматично підхоплюються нижче, і ви одразу заповнюєте картку нового об'єкта."
         )
+
+        if st.session_state.gis_last_stock_check is not None:
+            _check = st.session_state.gis_last_stock_check
+            st.markdown(f"**📦 Перевірка складу для щойно створеного об'єкта «{_check['object_name']}»:**")
+            render_stock_warnings(_check["warnings"], context_label=_check["object_name"])
+            st.session_state.gis_last_stock_check = None
 
         if not FOLIUM_AVAILABLE:
             st.warning("⚠️ Бібліотеки `folium` та `streamlit-folium` не встановлені. Виконайте: `pip install folium streamlit-folium`")
@@ -817,6 +932,12 @@ if "gis_editor" in tab_map:
                         st.session_state.gis_object_counter += 1
                         st.session_state.gis_pending_point = None
 
+                        if new_object["status"] == "АВАРІЯ":
+                            st.session_state.gis_last_stock_check = {
+                                "object_name": new_object["name"],
+                                "warnings": check_stock_warnings_for_object(new_object),
+                            }
+
                         now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
                         st.session_state.log_data.insert(0, {
                             "Час": now_str, "Тип": "Інспекція",
@@ -867,6 +988,160 @@ if "gis_editor" in tab_map:
                                    file_name="gis_editor_log.csv", mime="text/csv", use_container_width=True)
             else:
                 st.caption("Ще немає жодної зміни в цій сесії.")
+
+# ==========================================
+# 📦 ВКЛАДКА: РЕСУРСНИЙ МЕНЕДЖМЕНТ (ASSET & INVENTORY)
+# ==========================================
+if "assets" in tab_map:
+    with tab_map["assets"]:
+        st.title("📦 Ресурсний менеджмент — облік складських запасів")
+        st.caption(
+            "Складський облік запчастин по кожній структурній одиниці (СО). При реєстрації аварії "
+            "система автоматично звіряє наявність ключових запчастин на відповідному складі."
+        )
+
+        can_manage_assets = user_role in ("dispatcher", "admin")
+
+        inv_all = st.session_state.inventory
+        inv_rows = []
+        for i in inv_all:
+            label, color = get_stock_status(i["Кількість"], i["Мін. запас"])
+            inv_rows.append({**i, "Статус": label, "_color": color})
+
+        critical_items = [i for i in inv_rows if i["Статус"] == "🔴 Немає в наявності"]
+        low_items = [i for i in inv_rows if i["Статус"] == "🟡 Низький запас"]
+
+        ak1, ak2, ak3, ak4 = st.columns(4)
+        ak1.metric("📦 Позицій на обліку", len(inv_all))
+        ak2.metric("🏭 Складів (СО)", len(st.session_state.org_structure))
+        ak3.metric("🔴 Немає в наявності", len(critical_items), delta_color="inverse")
+        ak4.metric("🟡 Низький запас", len(low_items), delta_color="inverse")
+
+        if critical_items:
+            crit_names = sorted(set(
+                f"«{i['Найменування']}» ({i['СО'].replace('СО «','').replace(' ЕМ»','')})"
+                for i in critical_items
+            ))
+            st.error("🚨 Критичний дефіцит на складах: " + ", ".join(crit_names[:6]) + (" …" if len(crit_names) > 6 else ""))
+        elif low_items:
+            st.warning(f"⚠️ Є {len(low_items)} позицій з низьким запасом — перегляньте таблицю нижче.")
+        else:
+            st.success("✅ Усі склади забезпечені запчастинами вище мінімального рівня.")
+
+        st.markdown("---")
+
+        # ── Фільтри ──────────────────────────────────────────
+        flt_a1, flt_a2, flt_a3 = st.columns(3)
+        f_asset_so = flt_a1.selectbox("Структурна одиниця:", ["Усі"] + list(st.session_state.org_structure.keys()), key="f_asset_so")
+        f_asset_status = flt_a2.selectbox("Статус запасу:", ["Усі", "🔴 Немає в наявності", "🟡 Низький запас", "🟢 Норма"], key="f_asset_status")
+        f_asset_search = flt_a3.text_input("🔍 Пошук за назвою:", key="f_asset_search")
+
+        filtered_inv = inv_rows
+        if f_asset_so != "Усі":
+            filtered_inv = [i for i in filtered_inv if i["СО"] == f_asset_so]
+        if f_asset_status != "Усі":
+            filtered_inv = [i for i in filtered_inv if i["Статус"] == f_asset_status]
+        if f_asset_search.strip():
+            q = f_asset_search.strip().lower()
+            filtered_inv = [i for i in filtered_inv if q in i["Найменування"].lower()]
+
+        st.caption(f"Знайдено: {len(filtered_inv)} із {len(inv_all)} позицій")
+
+        inv_display_df = pd.DataFrame([{
+            "СО": i["СО"].replace("СО «", "").replace("»", ""),
+            "Найменування": i["Найменування"],
+            "Кількість": i["Кількість"],
+            "Одиниця": i["Одиниця"],
+            "Мін. запас": i["Мін. запас"],
+            "Статус": i["Статус"],
+        } for i in filtered_inv])
+
+        def _color_asset_status(val):
+            colors = {"🔴 Немає в наявності": "#ef4444", "🟡 Низький запас": "#f59e0b", "🟢 Норма": "#22c55e"}
+            return f"color: {colors.get(val, '#94a3b8')}; font-weight: bold"
+
+        if not inv_display_df.empty:
+            st.dataframe(inv_display_df.style.map(_color_asset_status, subset=["Статус"]),
+                         use_container_width=True, hide_index=True, height=380)
+        else:
+            st.info("Немає позицій за обраними фільтрами.")
+
+        st.markdown("#### 📊 Дефіцитні позиції по структурних одиницях")
+        deficit_by_so = {}
+        for so_name in st.session_state.org_structure.keys():
+            cnt = sum(1 for i in inv_all if i["СО"] == so_name and get_stock_status(i["Кількість"], i["Мін. запас"])[0] != "🟢 Норма")
+            deficit_by_so[so_name.replace("СО «", "").replace("»", "")] = cnt
+        fig_def, ax_def = plt.subplots(figsize=(9, 3.2))
+        fig_def.patch.set_facecolor("#0f172a")
+        ax_def.set_facecolor("#1e293b")
+        bar_colors_def = ["#ef4444" if v >= 3 else ("#f59e0b" if v >= 1 else "#22c55e") for v in deficit_by_so.values()]
+        bars_def = ax_def.bar(list(deficit_by_so.keys()), list(deficit_by_so.values()), color=bar_colors_def, width=0.6, edgecolor="#0f172a")
+        ax_def.bar_label(bars_def, color="#e2e8f0", fontsize=8, padding=3)
+        ax_def.tick_params(colors="#94a3b8", labelsize=7.5, axis="x", rotation=20)
+        ax_def.tick_params(colors="#94a3b8", labelsize=8, axis="y")
+        ax_def.set_ylabel("Позицій з дефіцитом", color="#64748b", fontsize=8)
+        ax_def.spines[:].set_color("#334155")
+        ax_def.grid(True, alpha=0.1, color="#334155", axis="y")
+        plt.tight_layout()
+        st.pyplot(fig_def)
+        plt.close(fig_def)
+
+        if can_manage_assets:
+            st.markdown("---")
+            col_update, col_add = st.columns(2)
+
+            with col_update:
+                st.markdown("#### ✏️ Оновити залишок на складі")
+                with st.form("update_stock_form"):
+                    upd_so = st.selectbox("Структурна одиниця:", list(st.session_state.org_structure.keys()), key="upd_so")
+                    upd_items_for_so = [i["Найменування"] for i in st.session_state.inventory if i["СО"] == upd_so]
+                    upd_item = st.selectbox("Позиція:", upd_items_for_so, key="upd_item")
+                    upd_qty = st.number_input("Нова кількість:", min_value=0, value=0, step=1, key="upd_qty")
+                    upd_submitted = st.form_submit_button("💾 Зберегти залишок", use_container_width=True)
+                    if upd_submitted:
+                        for i in st.session_state.inventory:
+                            if i["СО"] == upd_so and i["Найменування"] == upd_item:
+                                old_qty = i["Кількість"]
+                                i["Кількість"] = int(upd_qty)
+                                now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
+                                st.session_state.log_data.insert(0, {
+                                    "Час": now_str, "Тип": "Інспекція",
+                                    "Об'єкт": f"Склад: {upd_so}",
+                                    "Опис": f"[{current_user['display_name']}] 📦 Оновлено залишок «{upd_item}»: {old_qty} → {upd_qty} {i['Одиниця']}.",
+                                    "Критичність": "Низька"
+                                })
+                                break
+                        st.success(f"✅ Залишок «{upd_item}» на складі {upd_so} оновлено: {upd_qty}.")
+                        st.rerun()
+
+            with col_add:
+                st.markdown("#### ➕ Додати нову позицію на склад")
+                with st.form("add_stock_form", clear_on_submit=True):
+                    add_so = st.selectbox("Структурна одиниця:", list(st.session_state.org_structure.keys()), key="add_so")
+                    add_name = st.text_input("Найменування:", placeholder="напр. Розрядники ОПН-10")
+                    add_unit = st.selectbox("Одиниця виміру:", ["шт", "м", "компл.", "кг"], key="add_unit")
+                    add_qty = st.number_input("Початкова кількість:", min_value=0, value=10, step=1, key="add_qty")
+                    add_min = st.number_input("Мінімальний запас:", min_value=0, value=5, step=1, key="add_min")
+                    add_submitted = st.form_submit_button("➕ Додати на облік", use_container_width=True)
+                    if add_submitted:
+                        if not add_name.strip():
+                            st.error("❌ Вкажіть найменування.")
+                        else:
+                            st.session_state.inventory_counter += 1
+                            st.session_state.inventory.append({
+                                "id": f"INV-{st.session_state.inventory_counter:04d}",
+                                "СО": add_so, "Найменування": add_name.strip(), "Одиниця": add_unit,
+                                "Кількість": int(add_qty), "Мін. запас": int(add_min),
+                            })
+                            st.success(f"✅ Позицію «{add_name.strip()}» додано на склад {add_so}.")
+                            st.rerun()
+
+            st.markdown("---")
+            inv_export_csv = pd.DataFrame(st.session_state.inventory).to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Завантажити повний звіт складу (.csv)", data=inv_export_csv,
+                               file_name="inventory_report.csv", mime="text/csv")
+        else:
+            st.caption("ℹ️ Редагування складу доступне диспетчеру та адміністратору.")
 
 # ==========================================
 # 📨 ВКЛАДКА: ЗАЯВКИ КЛІЄНТІВ
