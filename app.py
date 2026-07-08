@@ -134,12 +134,71 @@ if not st.session_state.authenticated:
 current_user = st.session_state.current_user
 user_role = current_user["role"]
 
+# ==========================================
+# 🚨 ОПЕРАТИВНИЙ ЧАТ / СПОВІЩЕННЯ — ІНІЦІАЛІЗАЦІЯ ДАНИХ
+# (розміщено рано, до сайдбару, щоб бейдж непрочитаних рахувався одразу)
+# ==========================================
+BRIGADE_NAMES = ["Бригада №1 (ОВБ Центр)", "Бригада №2 (Шаргородська дільниця)"]
+NOTIFY_RECIPIENTS = ["Усі бригади"] + BRIGADE_NAMES
+NOTIFY_PRIORITIES = {"🔴 Термінове": "#ef4444", "🟡 Важливе": "#f59e0b", "🔵 Інформаційне": "#38bdf8"}
+NOTIFY_CHANNELS = ["📲 Push-сповіщення", "✉️ SMS", "📲✉️ Push + SMS"]
+NOTIFY_TEMPLATES = [
+    "— оберіть шаблон —",
+    "🌩️ Зміна погодних умов у зоні робіт — очікується посилення вітру/грози. Дотримуйтесь техніки безпеки.",
+    "🔁 Можливе повторне відключення на лінії протягом найближчої години.",
+    "🛑 Термінове припинення робіт — негайно вийдіть на зв'язок з диспетчером.",
+    "⚡ На об'єкті зафіксовано стрибок напруги — перевірте показники перед продовженням робіт.",
+    "✅ Роботи на суміжній ділянці завершено, можна продовжувати за графіком.",
+    "🚗 Змінено маршрут виїзду через ускладнення дорожнього руху.",
+]
+
+if "notifications" not in st.session_state:
+    _rnd.seed(77)
+    _now_notif = datetime.datetime.now()
+    _seed_notifications = [
+        ("Бригада №2 (Шаргородська дільниця)", "🔴 Термінове", "📲✉️ Push + SMS",
+         "Погіршення погодних умов", "Очікується грозовий фронт над Шаргородською дільницею близько 15:00. Призупиніть роботи на висоті до відбою.", 40),
+        ("Бригада №1 (ОВБ Центр)", "🟡 Важливе", "📲 Push-сповіщення",
+         "Повторне відключення", "На ТП-245 можливе повторне відключення протягом години через заміну обладнання.", 95),
+        ("Усі бригади", "🔵 Інформаційне", "📲 Push-сповіщення",
+         "Зміна графіка нарядів", "З понеділка наряди видаються централізовано через диспетчерську з 07:30.", 300),
+    ]
+    st.session_state.notifications = []
+    st.session_state.notification_counter = 0
+    for recipient, priority, channel, subject, message, minutes_ago in _seed_notifications:
+        st.session_state.notification_counter += 1
+        sent_dt = _now_notif - datetime.timedelta(minutes=minutes_ago)
+        st.session_state.notifications.append({
+            "id": f"NOTICE-{st.session_state.notification_counter}",
+            "Час": sent_dt.strftime("%d.%m.%Y %H:%M"),
+            "_dt": sent_dt,
+            "Відправник": "Диспетчер Коваленко О.В.",
+            "Отримувач": recipient,
+            "Пріоритет": priority,
+            "Канал": channel,
+            "Тема": subject,
+            "Повідомлення": message,
+            "Статус": "Прочитано" if minutes_ago > 60 else "Доставлено",
+            "Прочитано_ким": [current_user["login"]] if minutes_ago > 60 else [],
+        })
+
 with st.sidebar:
     st.markdown(f"### {ROLE_LABELS.get(user_role, '👤 Користувач')}")
     st.markdown(f"**{current_user['display_name']}**")
     st.markdown(f"*{current_user['subdivision']}*")
     st.divider()
     st.markdown(f"🟢 Сеанс активний  \n`{datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}`")
+    if "notifications" in st.session_state:
+        if user_role == "brigade":
+            _unread_n = sum(
+                1 for n in st.session_state.notifications
+                if (n["Отримувач"] in ("Усі бригади", current_user["subdivision"]))
+                and current_user["login"] not in n["Прочитано_ким"]
+            )
+        else:
+            _unread_n = sum(1 for n in st.session_state.notifications if n["Статус"] == "Доставлено")
+        if _unread_n > 0:
+            st.warning(f"🚨 Непрочитаних сповіщень: **{_unread_n}**")
     if st.button("🚪 Вийти з системи", use_container_width=True):
         do_logout()
         st.rerun()
@@ -328,6 +387,7 @@ TAB_DEFINITIONS = {
     "dispatcher_tabs": [
         ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"),
         ("📨 Заявки клієнтів", "requests"),
+        ("🚨 Сповіщення", "notifications"),
         ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
@@ -336,6 +396,7 @@ TAB_DEFINITIONS = {
         ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"),
         ("📐 GIS Editor", "gis_editor"),
         ("📨 Заявки клієнтів", "requests"),
+        ("🚨 Сповіщення", "notifications"),
         ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
@@ -350,6 +411,7 @@ TAB_DEFINITIONS = {
     "brigade_tabs": [
         ("🏠 Головна", "home"),
         ("📨 Заявки клієнтів", "requests"),
+        ("🚨 Сповіщення", "notifications"),
         ("📱 Мобільний клієнт", "mobile"),
     ],
 }
@@ -955,6 +1017,151 @@ if "requests" in tab_map:
             st.download_button("📥 Завантажити реєстр заявок (.csv)",
                                 data=export_df.to_csv(index=False).encode("utf-8"),
                                 file_name="client_requests.csv", mime="text/csv")
+
+# ==========================================
+# 🚨 ВКЛАДКА: ОПЕРАТИВНИЙ ЧАТ / ЦЕНТР СПОВІЩЕНЬ
+# ==========================================
+if "notifications" in tab_map:
+    with tab_map["notifications"]:
+        st.title("🚨 Оперативний чат / Центр сповіщень")
+        st.caption("Швидкий канал зв'язку «диспетчер → бригада»: push-сповіщення та SMS про термінові зміни в обстановці.")
+
+        can_send_notif = user_role in ("dispatcher", "admin")
+        is_brigade_notif = user_role == "brigade"
+
+        def _notif_visible_to_current_user(n):
+            if can_send_notif:
+                return True
+            if is_brigade_notif:
+                return n["Отримувач"] in ("Усі бригади", current_user["subdivision"])
+            return False
+
+        all_notifs = st.session_state.notifications
+        visible_notifs = [n for n in all_notifs if _notif_visible_to_current_user(n)]
+
+        # ── KPI ──────────────────────────────────────────────
+        if can_send_notif:
+            total_sent = len(all_notifs)
+            urgent_cnt = sum(1 for n in all_notifs if n["Пріоритет"] == "🔴 Термінове")
+            unread_cnt = sum(1 for n in all_notifs if n["Статус"] == "Доставлено")
+            read_cnt = total_sent - unread_cnt
+            nk1, nk2, nk3, nk4 = st.columns(4)
+            nk1.metric("📤 Всього надіслано", total_sent)
+            nk2.metric("🔴 Термінових", urgent_cnt)
+            nk3.metric("📬 Доставлено (очікує)", unread_cnt)
+            nk4.metric("✅ Прочитано", read_cnt)
+        else:
+            unread_for_me = sum(
+                1 for n in visible_notifs if current_user["login"] not in n["Прочитано_ким"]
+            )
+            urgent_for_me = sum(
+                1 for n in visible_notifs
+                if n["Пріоритет"] == "🔴 Термінове" and current_user["login"] not in n["Прочитано_ким"]
+            )
+            nk1, nk2, nk3 = st.columns(3)
+            nk1.metric("📥 Отримано повідомлень", len(visible_notifs))
+            nk2.metric("🆕 Непрочитаних", unread_for_me)
+            nk3.metric("🔴 Термінових непрочитаних", urgent_for_me, delta_color="inverse")
+
+        st.markdown("---")
+
+        # ── Форма надсилання (лише диспетчер / адмін) ─────────
+        if can_send_notif:
+            with st.expander("➕ Надіслати нове сповіщення бригаді", expanded=True):
+                with st.form("send_notification_form", clear_on_submit=True):
+                    fn1, fn2, fn3 = st.columns(3)
+                    notif_recipient = fn1.selectbox("Отримувач:", NOTIFY_RECIPIENTS)
+                    notif_priority = fn2.selectbox("Пріоритет:", list(NOTIFY_PRIORITIES.keys()))
+                    notif_channel = fn3.selectbox("Канал доставки:", NOTIFY_CHANNELS)
+
+                    notif_template = st.selectbox("📋 Швидкий шаблон (необов'язково):", NOTIFY_TEMPLATES)
+                    notif_subject = st.text_input("Тема:", placeholder="напр. Зміна погодних умов")
+                    default_msg = notif_template if notif_template != "— оберіть шаблон —" else ""
+                    notif_message = st.text_area("Текст повідомлення:", value=default_msg, height=100,
+                                                  placeholder="Опишіть термінове оновлення для бригади...")
+
+                    notif_submitted = st.form_submit_button("🚨 Надіслати сповіщення", type="primary", use_container_width=True)
+                    if notif_submitted:
+                        if not notif_message.strip():
+                            st.error("❌ Введіть текст повідомлення.")
+                        else:
+                            st.session_state.notification_counter += 1
+                            now_dt = datetime.datetime.now()
+                            st.session_state.notifications.insert(0, {
+                                "id": f"NOTICE-{st.session_state.notification_counter}",
+                                "Час": now_dt.strftime("%d.%m.%Y %H:%M"),
+                                "_dt": now_dt,
+                                "Відправник": current_user["display_name"],
+                                "Отримувач": notif_recipient,
+                                "Пріоритет": notif_priority,
+                                "Канал": notif_channel,
+                                "Тема": notif_subject.strip() or "Без теми",
+                                "Повідомлення": notif_message.strip(),
+                                "Статус": "Доставлено",
+                                "Прочитано_ким": [],
+                            })
+                            st.session_state.log_data.insert(0, {
+                                "Час": now_dt.strftime("%d.%m %H:%M"), "Тип": "Інспекція",
+                                "Об'єкт": notif_recipient,
+                                "Опис": f"[{current_user['display_name']}] 🚨 Сповіщення ({notif_priority}) через {notif_channel}: «{notif_subject.strip() or 'Без теми'}» — {notif_message.strip()}",
+                                "Критичність": "Критична" if notif_priority == "🔴 Термінове" else "Висока"
+                            })
+                            st.toast(f"🚨 Сповіщення надіслано: {notif_recipient}")
+                            st.success(f"✅ Сповіщення «{notif_subject.strip() or 'Без теми'}» надіслано ({notif_channel}).")
+                            st.rerun()
+
+        st.markdown("---")
+
+        # ── Фільтри ──────────────────────────────────────────
+        st.markdown("#### 📋 " + ("Реєстр надісланих сповіщень" if can_send_notif else "Мої сповіщення"))
+        flt_n1, flt_n2, flt_n3 = st.columns(3)
+        f_notif_priority = flt_n1.selectbox("Пріоритет:", ["Усі"] + list(NOTIFY_PRIORITIES.keys()), key="f_notif_priority")
+        if can_send_notif:
+            f_notif_recipient = flt_n2.selectbox("Отримувач:", ["Усі"] + NOTIFY_RECIPIENTS, key="f_notif_recipient")
+        else:
+            f_notif_recipient = "Усі"
+        f_notif_status = flt_n3.selectbox("Статус:", ["Усі", "Доставлено", "Прочитано"], key="f_notif_status")
+
+        filtered_notifs = visible_notifs
+        if f_notif_priority != "Усі":
+            filtered_notifs = [n for n in filtered_notifs if n["Пріоритет"] == f_notif_priority]
+        if f_notif_recipient != "Усі":
+            filtered_notifs = [n for n in filtered_notifs if n["Отримувач"] == f_notif_recipient]
+        if f_notif_status != "Усі":
+            filtered_notifs = [n for n in filtered_notifs if n["Статус"] == f_notif_status]
+
+        st.caption(f"Знайдено: {len(filtered_notifs)} із {len(visible_notifs)} повідомлень")
+
+        for n in filtered_notifs:
+            prio_color = NOTIFY_PRIORITIES.get(n["Пріоритет"], "#64748b")
+            already_read_by_me = current_user["login"] in n["Прочитано_ким"]
+            with st.container(border=True):
+                hn1, hn2, hn3 = st.columns([2.2, 1, 1])
+                hn1.markdown(f"<span style='color:{prio_color};font-weight:700'>{n['Пріоритет']}</span> — **{n['Тема']}**", unsafe_allow_html=True)
+                status_disp = "✅ Прочитано" if n["Статус"] == "Прочитано" else "📬 Доставлено"
+                hn2.caption(status_disp)
+                hn3.caption(n["Канал"])
+                st.caption(f"👤 Від: {n['Відправник']} · 📍 Кому: {n['Отримувач']} · 🕐 {n['Час']}")
+                st.write(n["Повідомлення"])
+
+                if is_brigade_notif and not already_read_by_me:
+                    if st.button("✅ Підтвердити отримання", key=f"ack_{n['id']}", use_container_width=True):
+                        n["Прочитано_ким"].append(current_user["login"])
+                        n["Статус"] = "Прочитано"
+                        st.toast("✅ Отримання підтверджено диспетчеру.")
+                        st.rerun()
+                elif is_brigade_notif and already_read_by_me:
+                    st.caption("☑️ Ви підтвердили отримання цього повідомлення.")
+                elif can_send_notif and n["Прочитано_ким"]:
+                    st.caption(f"👁️ Підтвердили отримання: {', '.join(n['Прочитано_ким'])}")
+
+        # ── Експорт (для диспетчера/адміна) ───────────────────
+        if can_send_notif and all_notifs:
+            st.markdown("---")
+            notif_export_df = pd.DataFrame([{k: v for k, v in n.items() if k not in ("_dt", "Прочитано_ким")} for n in all_notifs])
+            st.download_button("📥 Завантажити журнал сповіщень (.csv)",
+                                data=notif_export_df.to_csv(index=False).encode("utf-8"),
+                                file_name="notifications_log.csv", mime="text/csv")
 
 # ==========================================
 # ВКЛАДКА: МОБІЛЬНИЙ КЛІЄНТ
