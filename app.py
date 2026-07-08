@@ -495,6 +495,7 @@ TAB_DEFINITIONS = {
         ("🚨 Сповіщення", "notifications"),
         ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
+        ("🧠 Інтелектуальна діагностика", "diagnostics"),
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
     ],
     "admin_tabs": [
@@ -505,6 +506,7 @@ TAB_DEFINITIONS = {
         ("🚨 Сповіщення", "notifications"),
         ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
+        ("🧠 Інтелектуальна діагностика", "diagnostics"),
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
         ("💰 CRM та Білінг", "crm"),
         ("💾 Data Центр", "data"), ("👥 Управління доступом", "users"),
@@ -632,8 +634,28 @@ def build_folium_map(objects, active_layers):
     return fmap
 
 # ==========================================
-# ВКЛАДКА: ГОЛОВНА СТОРІНКА
+# 🧠 ІНТЕЛЕКТУАЛЬНА ДІАГНОСТИКА — НОРМИ ГОСТ ТА ДОПОМІЖНІ ФУНКЦІЇ
 # ==========================================
+GOST_NOMINAL_VOLTAGES = {"220 В (фазна)": 220, "380 В (лінійна)": 380}
+GOST_NORMAL_PCT = 0.05   # ±5% — нормально допустиме відхилення (ГОСТ 13109-97 / ДСТУ EN 50160)
+GOST_LIMIT_PCT = 0.10    # ±10% — гранично допустиме відхилення
+
+def generate_demo_voltage_log(nominal=220, hours=24, seed=7):
+    """Генерує демонстраційний журнал вимірювань напруги з навмисно вбудованими
+    епізодами пере- та недонапруги для перевірки роботи детектора аномалій."""
+    rng = np.random.default_rng(seed)
+    points = hours * 12  # крок 5 хв
+    timestamps = pd.date_range(
+        end=datetime.datetime.now().replace(second=0, microsecond=0),
+        periods=points, freq="5min"
+    )
+    values = nominal + rng.normal(0, nominal * 0.015, size=points)
+    if points > 70:
+        values[40:58] += nominal * 0.13   # епізод перенапруги
+        values[150:172] -= nominal * 0.14  # епізод недонапруги (просадка)
+    return pd.DataFrame({"Час": timestamps, "Напруга (В)": np.round(values, 1)})
+
+
 if "home" in tab_map:
     with tab_map["home"]:
         st.markdown("""
@@ -1783,6 +1805,219 @@ if "analytics" in tab_map:
             st.error(f"🚨 Прогнозується перевантаження в: **{', '.join(overload_hours)}**")
         else:
             st.success(f"✅ Прогнозоване навантаження при {temperature}°C в межах норми. Пік: **{max(predicted_load)} МВт**.")
+
+# ==========================================
+# 🧠 ВКЛАДКА: ІНТЕЛЕКТУАЛЬНА ДІАГНОСТИКА (AI/ML ANOMALY DETECTION)
+# ==========================================
+if "diagnostics" in tab_map:
+    with tab_map["diagnostics"]:
+        st.title("🧠 Інтелектуальна діагностика — Детектор відхилень напруги")
+        st.caption(
+            "Завантажте журнал вимірювань напруги (CSV) — система автоматично підсвітить епізоди "
+            "виходу за межі ГОСТ 13109-97 / ДСТУ EN 50160 (220/380 В) і допоможе зупинити аварію "
+            "ще до виходу трансформатора з ладу."
+        )
+
+        col_upload, col_settings = st.columns([1.4, 1])
+        with col_upload:
+            uploaded_log = st.file_uploader("📤 Завантажити CSV з логом напруги:", type=["csv"], key="diag_uploader")
+            if uploaded_log is None:
+                st.info("Файл не завантажено. Можна протестувати детектор на демо-логу з вбудованими аномаліями.")
+                if st.button("🧪 Згенерувати демо-лог з аномаліями", use_container_width=True):
+                    st.session_state.diag_demo_requested = True
+        with col_settings:
+            nominal_label = st.selectbox("Номінальна напруга мережі:", list(GOST_NOMINAL_VOLTAGES.keys()), key="diag_nominal")
+            nominal = GOST_NOMINAL_VOLTAGES[nominal_label]
+            linked_object = st.selectbox(
+                "Прив'язати до об'єкта мережі (необов'язково):",
+                ["— не прив'язувати —"] + [o["name"] for o in st.session_state.objects],
+                key="diag_linked_object"
+            )
+
+        raw_df = None
+        if uploaded_log is not None:
+            try:
+                raw_df = pd.read_csv(uploaded_log)
+                st.session_state.diag_demo_requested = False
+            except Exception as e:
+                st.error(f"❌ Не вдалося прочитати файл: {e}")
+        elif st.session_state.get("diag_demo_requested"):
+            raw_df = generate_demo_voltage_log(nominal=nominal)
+            st.caption("ℹ️ Наразі показано згенерований демо-лог (без реального файлу).")
+
+        if raw_df is not None and not raw_df.empty:
+            cols = list(raw_df.columns)
+            c1, c2 = st.columns(2)
+            time_col_guess = next((c for c in cols if any(k in c.lower() for k in ["час", "time", "дата", "date"])), cols[0])
+            volt_col_guess = next((c for c in cols if any(k in c.lower() for k in ["напруг", "volt", "u,"])), cols[-1])
+            time_col = c1.selectbox("Колонка часу:", cols, index=cols.index(time_col_guess), key="diag_time_col")
+            volt_col = c2.selectbox("Колонка напруги (В):", cols, index=cols.index(volt_col_guess), key="diag_volt_col")
+
+            work_df = raw_df[[time_col, volt_col]].copy()
+            work_df.columns = ["Час", "Напруга"]
+            work_df["Напруга"] = pd.to_numeric(work_df["Напруга"], errors="coerce")
+            work_df = work_df.dropna(subset=["Напруга"])
+            try:
+                work_df["Час"] = pd.to_datetime(work_df["Час"])
+                work_df = work_df.sort_values("Час")
+            except Exception:
+                work_df["Час"] = range(len(work_df))
+            work_df = work_df.reset_index(drop=True)
+
+            if work_df.empty:
+                st.warning("⚠️ Не вдалося розпізнати числові значення напруги у вибраній колонці.")
+            else:
+                normal_low, normal_high = nominal * (1 - GOST_NORMAL_PCT), nominal * (1 + GOST_NORMAL_PCT)
+                limit_low, limit_high = nominal * (1 - GOST_LIMIT_PCT), nominal * (1 + GOST_LIMIT_PCT)
+
+                def _classify_voltage(v):
+                    if v < limit_low or v > limit_high:
+                        return "🔴 Критичне відхилення (поза ГОСТ)"
+                    if v < normal_low or v > normal_high:
+                        return "🟡 Попередження (межа допуску)"
+                    return "🟢 Норма"
+
+                work_df["Статус"] = work_df["Напруга"].apply(_classify_voltage)
+                work_df["Відхилення, %"] = ((work_df["Напруга"] - nominal) / nominal * 100).round(2)
+
+                total_n = len(work_df)
+                crit_n = int((work_df["Статус"] == "🔴 Критичне відхилення (поза ГОСТ)").sum())
+                warn_n = int((work_df["Статус"] == "🟡 Попередження (межа допуску)").sum())
+                norm_pct = round((total_n - crit_n - warn_n) / total_n * 100, 1)
+
+                dk1, dk2, dk3, dk4 = st.columns(4)
+                dk1.metric("📈 Записів проаналізовано", total_n)
+                dk2.metric("🟢 У нормі", f"{norm_pct}%")
+                dk3.metric("🟡 Попереджень", warn_n)
+                dk4.metric("🔴 Критичних відхилень", crit_n, delta_color="inverse")
+
+                if crit_n > 0:
+                    st.error(
+                        f"🚨 Виявлено {crit_n} вимірювань за межами ГОСТ ±10% "
+                        f"({limit_low:.0f}–{limit_high:.0f} В). Рекомендовано позапланову діагностику обладнання."
+                    )
+                elif warn_n > 0:
+                    st.warning(f"⚠️ {warn_n} вимірювань у зоні підвищеної уваги (±5–10% від номіналу). Рекомендовано моніторинг.")
+                else:
+                    st.success("✅ Усі виміряні значення напруги в межах норми ГОСТ.")
+
+                # ── Графік з підсвіченими відхиленнями ──────────
+                fig_v, ax_v = plt.subplots(figsize=(11, 4))
+                fig_v.patch.set_facecolor("#0f172a")
+                ax_v.set_facecolor("#1e293b")
+                x_vals = work_df["Час"]
+                ax_v.plot(x_vals, work_df["Напруга"], color="#38bdf8", linewidth=1.2, zorder=2, label="Виміряна напруга")
+                for status_label, color in [("🟡 Попередження (межа допуску)", "#f59e0b"),
+                                             ("🔴 Критичне відхилення (поза ГОСТ)", "#ef4444")]:
+                    mask = work_df["Статус"] == status_label
+                    if mask.any():
+                        ax_v.scatter(x_vals[mask], work_df.loc[mask, "Напруга"], color=color, s=20, zorder=3, label=status_label)
+                ax_v.axhline(nominal, color="#94a3b8", linewidth=1, alpha=0.6, label=f"Номінал {nominal} В")
+                ax_v.axhline(normal_high, color="#fbbf24", linestyle="--", linewidth=1, alpha=0.7)
+                ax_v.axhline(normal_low, color="#fbbf24", linestyle="--", linewidth=1, alpha=0.7, label="±5% (норм. допустиме)")
+                ax_v.axhline(limit_high, color="#ef4444", linestyle=":", linewidth=1.3, alpha=0.8)
+                ax_v.axhline(limit_low, color="#ef4444", linestyle=":", linewidth=1.3, alpha=0.8, label="±10% (гранично допустиме, ГОСТ)")
+                ax_v.fill_between(x_vals, normal_low, normal_high, color="#22c55e", alpha=0.05)
+                ax_v.set_ylabel("Напруга, В", color="#64748b", fontsize=9)
+                ax_v.tick_params(colors="#94a3b8", labelsize=8)
+                ax_v.spines[:].set_color("#334155")
+                ax_v.legend(fontsize=7.2, facecolor="#1e293b", edgecolor="#334155", labelcolor="#cbd5e1", loc="upper right", ncol=2)
+                ax_v.grid(True, alpha=0.12, color="#334155")
+                fig_v.autofmt_xdate()
+                plt.tight_layout()
+                st.pyplot(fig_v)
+                plt.close(fig_v)
+
+                # ── Виявлені епізоди відхилень (суцільні відрізки поза нормою) ──
+                st.markdown("#### 📋 Виявлені епізоди відхилень")
+                episodes = []
+                in_episode = False
+                ep_start_idx = None
+                ep_worst = None
+                for idx, row in work_df.iterrows():
+                    is_anomaly = row["Статус"] != "🟢 Норма"
+                    if is_anomaly and not in_episode:
+                        in_episode, ep_start_idx, ep_worst = True, idx, row["Статус"]
+                    elif is_anomaly and in_episode:
+                        if row["Статус"] == "🔴 Критичне відхилення (поза ГОСТ)":
+                            ep_worst = "🔴 Критичне відхилення (поза ГОСТ)"
+                    elif not is_anomaly and in_episode:
+                        ep_slice = work_df.loc[ep_start_idx:idx - 1]
+                        episodes.append({
+                            "Початок": ep_slice["Час"].iloc[0], "Кінець": ep_slice["Час"].iloc[-1],
+                            "Найгірший статус": ep_worst,
+                            "Макс. відхилення, %": ep_slice["Відхилення, %"].abs().max(),
+                            "Записів": len(ep_slice),
+                        })
+                        in_episode = False
+                if in_episode:
+                    ep_slice = work_df.loc[ep_start_idx:]
+                    episodes.append({
+                        "Початок": ep_slice["Час"].iloc[0], "Кінець": ep_slice["Час"].iloc[-1],
+                        "Найгірший статус": ep_worst,
+                        "Макс. відхилення, %": ep_slice["Відхилення, %"].abs().max(),
+                        "Записів": len(ep_slice),
+                    })
+
+                if episodes:
+                    def _color_episode_status(val):
+                        colors = {"🔴 Критичне відхилення (поза ГОСТ)": "#ef4444", "🟡 Попередження (межа допуску)": "#f59e0b"}
+                        return f"color: {colors.get(val, '#94a3b8')}; font-weight: bold"
+                    st.dataframe(pd.DataFrame(episodes).style.map(_color_episode_status, subset=["Найгірший статус"]),
+                                 use_container_width=True, hide_index=True)
+                else:
+                    st.caption("Епізодів відхилень не виявлено.")
+
+                # ── Проактивна рекомендація + інтеграція з журналом та складом ──
+                if crit_n > 0 or warn_n > 0:
+                    st.markdown("---")
+                    st.markdown("#### 🛠️ Проактивне обслуговування")
+                    obj_suffix = f" на об'єкті {linked_object}" if linked_object != "— не прив'язувати —" else ""
+                    rec_text = (
+                        f"AI-детектор виявив {crit_n} критичних та {warn_n} попереджувальних відхилень напруги "
+                        f"від номіналу {nominal} В за проаналізований період. Рекомендовано позапланову "
+                        f"діагностику обладнання{obj_suffix} до виходу трансформатора з ладу."
+                    )
+                    st.info(rec_text)
+
+                    linked_obj_data = next((o for o in st.session_state.objects if o["name"] == linked_object), None)
+                    if linked_obj_data:
+                        st.markdown("**📦 Пов'язана перевірка складу (на випадок заміни обладнання):**")
+                        render_stock_warnings(check_stock_warnings_for_object(linked_obj_data), context_label=linked_object)
+
+                    if user_role in ("dispatcher", "admin"):
+                        if st.button("📋 Зареєструвати рекомендацію в журналі подій", use_container_width=True, type="primary"):
+                            now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
+                            st.session_state.log_data.insert(0, {
+                                "Час": now_str, "Тип": "Інспекція",
+                                "Об'єкт": linked_object if linked_object != "— не прив'язувати —" else "Не вказано",
+                                "Опис": f"[{current_user['display_name']}] 🧠 AI-детектор аномалій напруги: {rec_text}",
+                                "Критичність": "Критична" if crit_n > 0 else "Висока"
+                            })
+                            st.success("✅ Рекомендацію додано до журналу подій.")
+                            st.rerun()
+
+                with st.expander("📄 Переглянути повну таблицю вимірювань"):
+                    def _color_row_status(val):
+                        colors = {"🔴 Критичне відхилення (поза ГОСТ)": "#ef4444",
+                                  "🟡 Попередження (межа допуску)": "#f59e0b", "🟢 Норма": "#22c55e"}
+                        return f"color: {colors.get(val, '#94a3b8')}; font-weight: bold"
+                    st.dataframe(work_df.style.map(_color_row_status, subset=["Статус"]),
+                                 use_container_width=True, hide_index=True, height=300)
+                    st.download_button("📥 Завантажити оброблений лог (.csv)",
+                                       data=work_df.to_csv(index=False).encode("utf-8"),
+                                       file_name="voltage_anomaly_report.csv", mime="text/csv")
+        else:
+            st.caption("Завантажте CSV-файл або згенеруйте демо-лог, щоб почати аналіз.")
+
+        with st.expander("ℹ️ Довідка: норми ГОСТ 13109-97 / ДСТУ EN 50160"):
+            st.markdown("""
+            * **Номінальна напруга:** 220 В (фазна) / 380 В (лінійна).
+            * **Нормально допустиме відхилення:** ± 5% від номіналу.
+            * **Гранично допустиме відхилення:** ± 10% від номіналу — перевищення цієї межі є порушенням
+              стандарту і потенційним фактором пошкодження обладнання (перегрів, вихід з ладу трансформатора).
+            * Формат CSV — довільний: детектор дозволяє вручну вказати, яка колонка містить час, а яка — напругу.
+            """)
 
 # ==========================================
 # 💰 ВКЛАДКА: CRM ТА БІЛІНГ
