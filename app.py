@@ -487,6 +487,116 @@ def render_stock_warnings(warnings, context_label=""):
             )
 
 # ==========================================
+# 🦺 ОХОРОНА ПРАЦІ ТА БЕЗПЕКА (SAFETY & COMPLIANCE) — ІНІЦІАЛІЗАЦІЯ ДАНИХ
+# ==========================================
+BRIEFING_TYPES = ["Цільовий (перед зміною)", "Повторний", "Позаплановий", "Вступний", "Первинний"]
+BRIEFING_TOPICS = [
+    "ПТБ (Правила технічної безпеки)",
+    "ПЕЕ (Правила експлуатації електроустановок)",
+    "Правила пожежної безпеки",
+    "Надання домедичної допомоги",
+]
+
+PPE_TYPES_PERIODICITY_MONTHS = {
+    "Діелектричні рукавички": 6,
+    "Діелектричний килимок": 12,
+    "Інструмент з ізольованими ручками": 12,
+    "Штанга ізолювальна": 12,
+    "Каска захисна діелектрична": 24,
+    "Пояс запобіжний (страхувальний)": 12,
+}
+
+DANGER_ZONE_REASONS = [
+    "Наряд-допуск: планове ТО", "Аварійно-відновлювальні роботи",
+    "Заміна обладнання", "Огляд / діагностика",
+]
+
+if "safety_briefings" not in st.session_state:
+    _rnd.seed(31)
+    _sb_now = datetime.datetime.now()
+    st.session_state.safety_briefings = []
+    _brief_id = 0
+    for _b_name, _days_ago in [(BRIGADE_NAMES[0], 0), (BRIGADE_NAMES[1], 2)]:
+        _brief_id += 1
+        _dt = _sb_now - datetime.timedelta(days=_days_ago, hours=_rnd.randint(0, 4))
+        st.session_state.safety_briefings.append({
+            "id": f"BRF-{_brief_id:04d}",
+            "Дата": _dt.strftime("%d.%m.%Y"), "Час": _dt.strftime("%H:%M"),
+            "_dt": _dt,
+            "Бригада": _b_name,
+            "Тип інструктажу": "Цільовий (перед зміною)",
+            "Тема": "ПТБ (Правила технічної безпеки)",
+            "Провів": "Диспетчер Коваленко О.В.",
+            "Підпис підтверджено": True,
+        })
+if "safety_briefing_counter" not in st.session_state:
+    st.session_state.safety_briefing_counter = len(st.session_state.safety_briefings)
+
+if "ppe_inventory" not in st.session_state:
+    _rnd.seed(77)
+    st.session_state.ppe_inventory = []
+    _ppe_id = 0
+    for _b_name in BRIGADE_NAMES:
+        for _ppe_type, _period_months in PPE_TYPES_PERIODICITY_MONTHS.items():
+            _ppe_id += 1
+            _days_since_test = _rnd.randint(10, _period_months * 30 - 20)
+            _last_test = datetime.date.today() - datetime.timedelta(days=_days_since_test)
+            st.session_state.ppe_inventory.append({
+                "id": f"PPE-{_ppe_id:04d}",
+                "Бригада": _b_name,
+                "Тип ЗІЗ": _ppe_type,
+                "Інв. №": f"{_rnd.randint(100, 999)}-{_ppe_id}",
+                "Періодичність, міс": _period_months,
+                "_last_test": _last_test,
+            })
+    # Навмисно робимо рукавички Бригади №2 простроченими — демонстраційний сценарій
+    # автоматичного блокування робіт під напругою через прострочені ЗІЗ.
+    for _item in st.session_state.ppe_inventory:
+        if _item["Бригада"] == BRIGADE_NAMES[1] and _item["Тип ЗІЗ"] == "Діелектричні рукавички":
+            _item["_last_test"] = datetime.date.today() - datetime.timedelta(days=220)
+if "ppe_counter" not in st.session_state:
+    st.session_state.ppe_counter = len(st.session_state.ppe_inventory)
+
+if "danger_zones" not in st.session_state:
+    st.session_state.danger_zones = []
+    _seed_obj = next((o for o in st.session_state.objects if o["name"] == "ТП-Шаргород-100"), None)
+    if _seed_obj:
+        st.session_state.danger_zones.append({
+            "id": "DZ-0001",
+            "Об'єкт": _seed_obj["name"],
+            "latitude": _seed_obj["latitude"], "longitude": _seed_obj["longitude"],
+            "Бригада": BRIGADE_NAMES[1],
+            "Причина": "Наряд-допуск: планове ТО",
+            "Початок": (datetime.datetime.now() - datetime.timedelta(hours=2)).strftime("%d.%m.%Y %H:%M"),
+            "Кінець": None,
+            "Статус": "Активна",
+            "Створив": "Диспетчер Коваленко О.В.",
+        })
+if "danger_zone_counter" not in st.session_state:
+    st.session_state.danger_zone_counter = len(st.session_state.danger_zones)
+
+def get_ppe_next_test_date(item):
+    return item["_last_test"] + datetime.timedelta(days=item["Періодичність, міс"] * 30)
+
+def get_ppe_status(item):
+    next_test = get_ppe_next_test_date(item)
+    days_left = (next_test - datetime.date.today()).days
+    if days_left < 0:
+        return "🔴 Прострочено", "#ef4444", days_left
+    if days_left <= 30:
+        return "🟡 Плановий огляд", "#f59e0b", days_left
+    return "🟢 Дійсний", "#22c55e", days_left
+
+def get_active_danger_zone(obj_name):
+    return next((z for z in st.session_state.danger_zones if z["Об'єкт"] == obj_name and z["Статус"] == "Активна"), None)
+
+def get_last_briefing(brigade_name):
+    briefs = [b for b in st.session_state.safety_briefings if b["Бригада"] == brigade_name]
+    if not briefs:
+        return None
+    return max(briefs, key=lambda b: b["_dt"])
+
+# ==========================================
 # 📐 GIS EDITOR — ІНІЦІАЛІЗАЦІЯ ДАНИХ
 # ==========================================
 GIS_OBJECT_TYPES = ["Опора", "Підстанція", "Центр клієнтів"]
@@ -509,6 +619,7 @@ TAB_DEFINITIONS = {
         ("📦 Ресурси (Склад)", "assets"),
         ("📨 Заявки клієнтів", "requests"),
         ("🚨 Сповіщення", "notifications"),
+        ("🦺 Охорона праці", "safety"),
         ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
         ("🧠 Інтелектуальна діагностика", "diagnostics"),
@@ -521,6 +632,7 @@ TAB_DEFINITIONS = {
         ("📦 Ресурси (Склад)", "assets"),
         ("📨 Заявки клієнтів", "requests"),
         ("🚨 Сповіщення", "notifications"),
+        ("🦺 Охорона праці", "safety"),
         ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
         ("🧠 Інтелектуальна діагностика", "diagnostics"),
@@ -539,6 +651,7 @@ TAB_DEFINITIONS = {
         ("🏠 Головна", "home"),
         ("📨 Заявки клієнтів", "requests"),
         ("🚨 Сповіщення", "notifications"),
+        ("🦺 Охорона праці", "safety"),
         ("📱 Мобільний клієнт", "mobile"),
     ],
 }
@@ -636,6 +749,32 @@ def build_folium_map(objects, active_layers):
                           popup=folium.Popup(build_popup_html(obj), max_width=300),
                           icon=folium.Icon(color=color, icon=icon, prefix="fa")).add_to(obj_group)
         obj_group.add_to(fmap)
+    if "Небезпечні зони" in active_layers:
+        zone_lock_group = folium.FeatureGroup(name="🔒 Небезпечні зони (LOTO)", show=True)
+        for zone in st.session_state.get("danger_zones", []):
+            if zone.get("Статус") != "Активна":
+                continue
+            zlat, zlon = zone.get("latitude"), zone.get("longitude")
+            if zlat is None or zlon is None:
+                continue
+            zone_popup = f"""
+            <div style="font-family:sans-serif;min-width:220px;padding:4px">
+              <b style="color:#dc2626">🔒 ЗАБЛОКОВАНО (LOTO)</b><br>
+              <b>{zone.get("Об'єкт")}</b><hr style="margin:6px 0">
+              <table style="width:100%;font-size:12px">
+                <tr><td style="color:#666">Бригада:</td><td><b>{zone.get('Бригада')}</b></td></tr>
+                <tr><td style="color:#666">Причина:</td><td>{zone.get('Причина')}</td></tr>
+                <tr><td style="color:#666">Початок:</td><td>{zone.get('Початок')}</td></tr>
+              </table>
+              <p style="color:#dc2626;font-weight:bold;margin-top:6px;">НЕ ПОДАВАТИ НАПРУГУ</p>
+            </div>"""
+            folium.Circle(
+                location=[zlat, zlon], radius=180, color="#dc2626", weight=3,
+                dash_array="8 5", fill=True, fill_color="#dc2626", fill_opacity=0.22,
+                tooltip=folium.Tooltip(f"🔒 ЗАБЛОКОВАНО: {zone.get('Бригада')}", sticky=True),
+                popup=folium.Popup(zone_popup, max_width=260),
+            ).add_to(zone_lock_group)
+        zone_lock_group.add_to(fmap)
     legend_html = """
     <div style="position:fixed;bottom:30px;left:30px;z-index:9999;background:#1e293b;color:#f1f5f9;
                 padding:12px 16px;border-radius:8px;font-size:12px;border:1px solid #334155;
@@ -646,7 +785,8 @@ def build_folium_map(objects, active_layers):
       <span style="color:#22c55e">●</span> Норма<br>
       <span style="color:#facc15">━━</span> ЛЕП 110 кВ &nbsp;
       <span style="color:#fb923c">╌╌</span> ЛЕП 35 кВ &nbsp;
-      <span style="color:#4ade80">╌╌</span> КЛ 10 кВ
+      <span style="color:#4ade80">╌╌</span> КЛ 10 кВ<br>
+      <span style="color:#dc2626">◌</span> Небезпечна зона (LOTO) — заборонено подавати напругу
     </div>"""
     fmap.get_root().html.add_child(folium.Element(legend_html))
     folium.LayerControl(collapsed=False).add_to(fmap)
@@ -797,14 +937,16 @@ if "map" in tab_map:
         col_map, col_side = st.columns([2.3, 1])
         with col_map:
             st.markdown("##### 🛠️ Активні шари карти:")
-            layer_cols = st.columns(3)
+            layer_cols = st.columns(4)
             show_objects = layer_cols[0].checkbox("📍 Об'єкти мережі", value=True)
             show_lep     = layer_cols[1].checkbox("⚡ Лінії ЛЕП",      value=True)
             show_zones   = layer_cols[2].checkbox("🗺️ Зони СО",        value=False)
+            show_loto    = layer_cols[3].checkbox("🔒 Небезпечні зони (LOTO)", value=True)
             active_layers = []
             if show_objects: active_layers.append("Об'єкти")
             if show_lep:     active_layers.append("ЛЕП")
             if show_zones:   active_layers.append("Зони СО")
+            if show_loto:    active_layers.append("Небезпечні зони")
             if FOLIUM_AVAILABLE:
                 fmap = build_folium_map(st.session_state.objects, active_layers)
                 map_result = st_folium(fmap, width="100%", height=520, returned_objects=["last_object_clicked_popup"])
@@ -843,9 +985,18 @@ if "map" in tab_map:
             if "АВАРІЯ" in status:
                 st.markdown("**📦 Забезпеченість складу для ліквідації аварії:**")
                 render_stock_warnings(check_stock_warnings_for_object(obj))
+
+            active_zone = get_active_danger_zone(obj.get("name"))
+            if active_zone:
+                st.error(
+                    f"🔒 **ЗАБЛОКОВАНО (LOTO):** на об'єкті ведуться роботи — "
+                    f"**{active_zone['Бригада']}** ({active_zone['Причина']}), з {active_zone['Початок']}. "
+                    f"Подача напруги заборонена до зняття блокування на вкладці «🦺 Охорона праці»."
+                )
+
             st.divider()
             st.markdown("🎛️ **Команди дистанційного керування:**")
-            if st.button("⚡ Вимкнути фідер (SCADA)", use_container_width=True):
+            if st.button("⚡ Вимкнути фідер (SCADA)", use_container_width=True, disabled=bool(active_zone)):
                 st.toast(f"🚨 Сигнал оперативної комутації надіслано на {obj.get('name')}!")
                 st.session_state.log_data.insert(0, {
                     "Час": datetime.datetime.now().strftime("%d.%m %H:%M"), "Тип": "Ремонт",
@@ -853,6 +1004,8 @@ if "map" in tab_map:
                     "Опис": f"Дистанційне оперативне керування. Оператор: {current_user['display_name']}",
                     "Критичність": "Висока"
                 })
+            if active_zone:
+                st.caption("🔒 Кнопку дистанційного керування заблоковано системою LOTO, доки на об'єкті триває наряд-допуск.")
             if st.button("📲 Передати наряд черговому майстру дільниці", use_container_width=True):
                 st.toast("📡 Дані надіслано в базу відповідної структурної одиниці ЕМ!")
             permit_text = (
@@ -1478,6 +1631,304 @@ if "notifications" in tab_map:
             st.download_button("📥 Завантажити журнал сповіщень (.csv)",
                                 data=notif_export_df.to_csv(index=False).encode("utf-8"),
                                 file_name="notifications_log.csv", mime="text/csv")
+
+# ==========================================
+# 🦺 ВКЛАДКА: ОХОРОНА ПРАЦІ ТА БЕЗПЕКА (SAFETY & COMPLIANCE)
+# ==========================================
+if "safety" in tab_map:
+    with tab_map["safety"]:
+        st.title("🦺 Охорона праці та безпека — Safety & Compliance")
+        st.caption(
+            "Журнал інструктажів, моніторинг термінів перевірки засобів захисту (ЗІЗ) та карта "
+            "небезпечних зон із системою блокувань (LOTO) — щоб напруга не подавалась туди, де працює бригада."
+        )
+
+        can_manage_safety = user_role in ("dispatcher", "admin")
+        is_brigade_user = user_role == "brigade"
+
+        safety_tab1, safety_tab2, safety_tab3 = st.tabs([
+            "📋 Журнал інструктажів", "🧤 Моніторинг ЗІЗ", "🗺️ Карта небезпечних зон (LOTO)",
+        ])
+
+        # ─────────────────────────────────────────────────────
+        # ПІДВКЛАДКА 1: Журнал інструктажів
+        # ─────────────────────────────────────────────────────
+        with safety_tab1:
+            st.markdown("### 📋 Журнал інструктажів (ПТБ / ПЕЕ)")
+
+            today_str = datetime.date.today().strftime("%d.%m.%Y")
+            briefing_kpi_cols = st.columns(len(BRIGADE_NAMES) + 1)
+            briefed_today_count = 0
+            for i, b_name in enumerate(BRIGADE_NAMES):
+                last_brief = get_last_briefing(b_name)
+                briefed_today = bool(last_brief and last_brief["Дата"] == today_str)
+                if briefed_today:
+                    briefed_today_count += 1
+                with briefing_kpi_cols[i]:
+                    if last_brief is None:
+                        st.error(f"**{b_name}**\n\n❌ Інструктажів немає")
+                    elif briefed_today:
+                        st.success(f"**{b_name}**\n\n✅ Пройдено сьогодні о {last_brief['Час']}")
+                    else:
+                        st.warning(f"**{b_name}**\n\n⚠️ Востаннє: {last_brief['Дата']} {last_brief['Час']}")
+            briefing_kpi_cols[-1].metric("Бригад проінструктовано сьогодні", f"{briefed_today_count}/{len(BRIGADE_NAMES)}")
+
+            if briefed_today_count < len(BRIGADE_NAMES):
+                st.warning("⚠️ Не всі бригади пройшли цільовий інструктаж перед сьогоднішньою зміною.")
+
+            st.markdown("---")
+            st.markdown("#### ➕ Зафіксувати проведення інструктажу")
+            with st.form("safety_briefing_form", clear_on_submit=True):
+                bf1, bf2 = st.columns(2)
+                if is_brigade_user:
+                    briefing_brigade = bf1.selectbox(
+                        "Бригада:", BRIGADE_NAMES,
+                        index=BRIGADE_NAMES.index(current_user["subdivision"]) if current_user["subdivision"] in BRIGADE_NAMES else 0
+                    )
+                else:
+                    briefing_brigade = bf1.selectbox("Бригада:", BRIGADE_NAMES)
+                briefing_type = bf2.selectbox("Тип інструктажу:", BRIEFING_TYPES)
+                bf3, bf4 = st.columns(2)
+                briefing_topic = bf3.selectbox("Тема:", BRIEFING_TOPICS)
+                briefing_conductor = bf4.text_input("Хто провів:", value=current_user["display_name"])
+                briefing_signed = st.checkbox("✅ Підтверджую проведення інструктажу (електронний підпис)")
+                briefing_submitted = st.form_submit_button("📋 Зафіксувати в журналі", type="primary", use_container_width=True)
+                if briefing_submitted:
+                    if not briefing_signed:
+                        st.error("❌ Підтвердіть проведення інструктажу підписом перед фіксацією.")
+                    else:
+                        st.session_state.safety_briefing_counter += 1
+                        now_dt = datetime.datetime.now()
+                        st.session_state.safety_briefings.insert(0, {
+                            "id": f"BRF-{st.session_state.safety_briefing_counter:04d}",
+                            "Дата": now_dt.strftime("%d.%m.%Y"), "Час": now_dt.strftime("%H:%M"),
+                            "_dt": now_dt,
+                            "Бригада": briefing_brigade,
+                            "Тип інструктажу": briefing_type,
+                            "Тема": briefing_topic,
+                            "Провів": briefing_conductor.strip() or current_user["display_name"],
+                            "Підпис підтверджено": True,
+                        })
+                        st.session_state.log_data.insert(0, {
+                            "Час": now_dt.strftime("%d.%m %H:%M"), "Тип": "Інспекція",
+                            "Об'єкт": f"Бригада: {briefing_brigade}",
+                            "Опис": f"[{current_user['display_name']}] 🦺 Проведено інструктаж «{briefing_topic}» ({briefing_type}).",
+                            "Критичність": "Низька",
+                        })
+                        st.success(f"✅ Інструктаж для «{briefing_brigade}» зафіксовано в журналі.")
+                        st.rerun()
+
+            st.markdown("#### 🗂️ Реєстр проведених інструктажів")
+            flt_b1, flt_b2 = st.columns(2)
+            f_brief_brigade = flt_b1.selectbox("Фільтр за бригадою:", ["Усі"] + BRIGADE_NAMES, key="f_brief_brigade")
+            f_brief_topic = flt_b2.selectbox("Фільтр за темою:", ["Усі"] + BRIEFING_TOPICS, key="f_brief_topic")
+            briefs_filtered = st.session_state.safety_briefings
+            if is_brigade_user:
+                briefs_filtered = [b for b in briefs_filtered if b["Бригада"] == current_user["subdivision"]]
+            if f_brief_brigade != "Усі":
+                briefs_filtered = [b for b in briefs_filtered if b["Бригада"] == f_brief_brigade]
+            if f_brief_topic != "Усі":
+                briefs_filtered = [b for b in briefs_filtered if b["Тема"] == f_brief_topic]
+
+            if briefs_filtered:
+                briefs_df = pd.DataFrame([{k: v for k, v in b.items() if k not in ("id", "_dt")} for b in briefs_filtered])
+                st.dataframe(briefs_df, use_container_width=True, hide_index=True)
+                st.download_button("📥 Завантажити журнал інструктажів (.csv)",
+                                   data=briefs_df.to_csv(index=False).encode("utf-8"),
+                                   file_name="safety_briefings_log.csv", mime="text/csv")
+            else:
+                st.caption("Записів не знайдено за обраними фільтрами.")
+
+        # ─────────────────────────────────────────────────────
+        # ПІДВКЛАДКА 2: Моніторинг ЗІЗ
+        # ─────────────────────────────────────────────────────
+        with safety_tab2:
+            st.markdown("### 🧤 Моніторинг засобів індивідуального захисту (ЗІЗ)")
+
+            ppe_rows = []
+            for item in st.session_state.ppe_inventory:
+                label, color, days_left = get_ppe_status(item)
+                ppe_rows.append({**item, "Статус": label, "_color": color, "Днів до перевірки": days_left,
+                                  "Наступна перевірка": get_ppe_next_test_date(item).strftime("%d.%m.%Y")})
+
+            expired_ppe = [i for i in ppe_rows if i["Статус"] == "🔴 Прострочено"]
+            upcoming_ppe = [i for i in ppe_rows if i["Статус"] == "🟡 Плановий огляд"]
+
+            pk1, pk2, pk3 = st.columns(3)
+            pk1.metric("🧰 Позицій ЗІЗ на обліку", len(ppe_rows))
+            pk2.metric("🔴 Прострочено", len(expired_ppe), delta_color="inverse")
+            pk3.metric("🟡 Плановий огляд (30 днів)", len(upcoming_ppe), delta_color="inverse")
+
+            if expired_ppe:
+                blocked_brigades = sorted(set(i["Бригада"] for i in expired_ppe))
+                for b in blocked_brigades:
+                    b_expired = [i["Тип ЗІЗ"] for i in expired_ppe if i["Бригада"] == b]
+                    st.error(
+                        f"🚫 **{b}**: заборонено виконувати роботи під напругою — прострочено перевірку: "
+                        + ", ".join(f"«{x}»" for x in b_expired) + "."
+                    )
+            elif upcoming_ppe:
+                st.warning(f"⚠️ {len(upcoming_ppe)} позицій ЗІЗ потребують планового огляду протягом 30 днів.")
+            else:
+                st.success("✅ Усі засоби захисту в межах терміну дії.")
+
+            st.markdown("---")
+            flt_p1, flt_p2, flt_p3 = st.columns(3)
+            f_ppe_brigade = flt_p1.selectbox("Бригада:", ["Усі"] + BRIGADE_NAMES, key="f_ppe_brigade")
+            f_ppe_type = flt_p2.selectbox("Тип ЗІЗ:", ["Усі"] + list(PPE_TYPES_PERIODICITY_MONTHS.keys()), key="f_ppe_type")
+            f_ppe_status = flt_p3.selectbox("Статус:", ["Усі", "🔴 Прострочено", "🟡 Плановий огляд", "🟢 Дійсний"], key="f_ppe_status")
+
+            ppe_filtered = ppe_rows
+            if is_brigade_user:
+                ppe_filtered = [i for i in ppe_filtered if i["Бригада"] == current_user["subdivision"]]
+            if f_ppe_brigade != "Усі":
+                ppe_filtered = [i for i in ppe_filtered if i["Бригада"] == f_ppe_brigade]
+            if f_ppe_type != "Усі":
+                ppe_filtered = [i for i in ppe_filtered if i["Тип ЗІЗ"] == f_ppe_type]
+            if f_ppe_status != "Усі":
+                ppe_filtered = [i for i in ppe_filtered if i["Статус"] == f_ppe_status]
+
+            ppe_display_df = pd.DataFrame([{
+                "Бригада": i["Бригада"], "Тип ЗІЗ": i["Тип ЗІЗ"], "Інв. №": i["Інв. №"],
+                "Остання перевірка": i["_last_test"].strftime("%d.%m.%Y"),
+                "Наступна перевірка": i["Наступна перевірка"],
+                "Днів до перевірки": i["Днів до перевірки"], "Статус": i["Статус"],
+            } for i in ppe_filtered])
+
+            def _color_ppe_status(val):
+                colors = {"🔴 Прострочено": "#ef4444", "🟡 Плановий огляд": "#f59e0b", "🟢 Дійсний": "#22c55e"}
+                return f"color: {colors.get(val, '#94a3b8')}; font-weight: bold"
+
+            if not ppe_display_df.empty:
+                st.dataframe(ppe_display_df.style.map(_color_ppe_status, subset=["Статус"]),
+                             use_container_width=True, hide_index=True, height=340)
+            else:
+                st.info("Немає позицій за обраними фільтрами.")
+
+            if can_manage_safety:
+                st.markdown("#### 🔬 Зареєструвати проходження перевірки / випробування")
+                with st.form("ppe_test_form"):
+                    pt1, pt2 = st.columns(2)
+                    test_brigade = pt1.selectbox("Бригада:", BRIGADE_NAMES, key="ppe_test_brigade")
+                    ppe_options_for_brigade = [
+                        f"{i['Тип ЗІЗ']} ({i['Інв. №']})" for i in st.session_state.ppe_inventory if i["Бригада"] == test_brigade
+                    ]
+                    test_item_label = pt2.selectbox("Позиція ЗІЗ:", ppe_options_for_brigade, key="ppe_test_item")
+                    test_date = st.date_input("Дата проходження перевірки:", datetime.date.today(), key="ppe_test_date")
+                    ppe_test_submitted = st.form_submit_button("✅ Зареєструвати перевірку", use_container_width=True)
+                    if ppe_test_submitted:
+                        for i in st.session_state.ppe_inventory:
+                            if i["Бригада"] == test_brigade and f"{i['Тип ЗІЗ']} ({i['Інв. №']})" == test_item_label:
+                                i["_last_test"] = test_date
+                                now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
+                                st.session_state.log_data.insert(0, {
+                                    "Час": now_str, "Тип": "Інспекція",
+                                    "Об'єкт": f"ЗІЗ: {test_brigade}",
+                                    "Опис": f"[{current_user['display_name']}] 🧤 Пройдено перевірку «{i['Тип ЗІЗ']}» (інв. №{i['Інв. №']}). Дата: {test_date.strftime('%d.%m.%Y')}.",
+                                    "Критичність": "Низька",
+                                })
+                                break
+                        st.success(f"✅ Перевірку зафіксовано. Наступна дата перерахована автоматично.")
+                        st.rerun()
+
+                st.markdown("---")
+                ppe_export_csv = ppe_display_df.to_csv(index=False).encode("utf-8")
+                st.download_button("📥 Завантажити звіт по ЗІЗ (.csv)", data=ppe_export_csv,
+                                   file_name="ppe_monitoring_report.csv", mime="text/csv")
+            else:
+                st.caption("ℹ️ Реєстрація проходження перевірок ЗІЗ доступна диспетчеру та адміністратору.")
+
+        # ─────────────────────────────────────────────────────
+        # ПІДВКЛАДКА 3: Карта небезпечних зон (LOTO)
+        # ─────────────────────────────────────────────────────
+        with safety_tab3:
+            st.markdown("### 🗺️ Карта небезпечних зон — система блокувань (LOTO)")
+            st.caption(
+                "Lock-Out / Tag-Out: місця, де тривають роботи бригад, підсвічуються на мапі та автоматично "
+                "блокують дистанційну подачу напруги на вкладці «Диспетчер мапи», доки роботи не завершено."
+            )
+
+            active_zones_all = [z for z in st.session_state.danger_zones if z["Статус"] == "Активна"]
+
+            zk1, zk2 = st.columns(2)
+            zk1.metric("🔒 Активних небезпечних зон", len(active_zones_all))
+            zk2.metric("📋 Всього зон за весь час", len(st.session_state.danger_zones))
+
+            if FOLIUM_AVAILABLE:
+                loto_map = build_folium_map(st.session_state.objects, ["Об'єкти", "Небезпечні зони"])
+                st_folium(loto_map, width="100%", height=460, returned_objects=[], key="safety_loto_map")
+            else:
+                st.warning("⚠️ Бібліотеки `folium` та `streamlit-folium` не встановлені.")
+
+            if can_manage_safety:
+                st.markdown("---")
+                st.markdown("#### 🔒 Створити нову небезпечну зону (наряд-допуск)")
+                with st.form("new_danger_zone_form", clear_on_submit=True):
+                    dz1, dz2 = st.columns(2)
+                    dz_object = dz1.selectbox("Об'єкт мережі:", [o["name"] for o in st.session_state.objects], key="dz_object")
+                    dz_brigade = dz2.selectbox("Бригада, що виконує роботи:", BRIGADE_NAMES, key="dz_brigade")
+                    dz_reason = st.selectbox("Причина / вид робіт:", DANGER_ZONE_REASONS, key="dz_reason")
+                    dz_submitted = st.form_submit_button("🔒 Заблокувати зону (почати роботи)", type="primary", use_container_width=True)
+                    if dz_submitted:
+                        if get_active_danger_zone(dz_object):
+                            st.error(f"❌ На об'єкті «{dz_object}» вже є активна небезпечна зона.")
+                        else:
+                            obj_data = next(o for o in st.session_state.objects if o["name"] == dz_object)
+                            st.session_state.danger_zone_counter += 1
+                            now_dt = datetime.datetime.now()
+                            st.session_state.danger_zones.insert(0, {
+                                "id": f"DZ-{st.session_state.danger_zone_counter:04d}",
+                                "Об'єкт": dz_object,
+                                "latitude": obj_data["latitude"], "longitude": obj_data["longitude"],
+                                "Бригада": dz_brigade, "Причина": dz_reason,
+                                "Початок": now_dt.strftime("%d.%m.%Y %H:%M"), "Кінець": None,
+                                "Статус": "Активна", "Створив": current_user["display_name"],
+                            })
+                            st.session_state.log_data.insert(0, {
+                                "Час": now_dt.strftime("%d.%m %H:%M"), "Тип": "Ремонт",
+                                "Об'єкт": dz_object,
+                                "Опис": f"[{current_user['display_name']}] 🔒 Створено небезпечну зону (LOTO): {dz_reason}, бригада {dz_brigade}. Подача напруги заблокована.",
+                                "Критичність": "Висока",
+                            })
+                            st.success(f"✅ Зону на об'єкті «{dz_object}» заблоковано. Подача напруги неможлива до зняття блокування.")
+                            st.rerun()
+
+            st.markdown("#### 📋 Активні небезпечні зони")
+            if active_zones_all:
+                for zone in active_zones_all:
+                    with st.container(border=True):
+                        zc1, zc2, zc3 = st.columns([2, 1.3, 1])
+                        _zone_obj_name = zone["Об'єкт"]
+                        zc1.markdown(f"🔒 **{_zone_obj_name}** — {zone['Причина']}")
+                        zc2.caption(f"Бригада: {zone['Бригада']}\n\nПочаток: {zone['Початок']}")
+                        if can_manage_safety:
+                            if zc3.button("🔓 Зняти блокування", key=f"unlock_{zone['id']}", use_container_width=True):
+                                zone["Статус"] = "Знята"
+                                zone["Кінець"] = datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
+                                now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
+                                st.session_state.log_data.insert(0, {
+                                    "Час": now_str, "Тип": "Ремонт",
+                                    "Об'єкт": zone["Об'єкт"],
+                                    "Опис": f"[{current_user['display_name']}] 🔓 Знято блокування (LOTO) — роботи бригади {zone['Бригада']} завершено. Подачу напруги дозволено.",
+                                    "Критичність": "Висока",
+                                })
+                                st.success(f"✅ Блокування на «{_zone_obj_name}» знято.")
+                                st.rerun()
+            else:
+                st.caption("Активних небезпечних зон немає — всі об'єкти доступні для подачі напруги.")
+
+            st.markdown("#### 🕓 Історія небезпечних зон")
+            if st.session_state.danger_zones:
+                zones_hist_df = pd.DataFrame([{
+                    "Об'єкт": z["Об'єкт"], "Бригада": z["Бригада"], "Причина": z["Причина"],
+                    "Початок": z["Початок"], "Кінець": z["Кінець"] or "—", "Статус": z["Статус"],
+                } for z in st.session_state.danger_zones])
+                st.dataframe(zones_hist_df, use_container_width=True, hide_index=True)
+                st.download_button("📥 Завантажити історію зон (.csv)",
+                                   data=zones_hist_df.to_csv(index=False).encode("utf-8"),
+                                   file_name="danger_zones_history.csv", mime="text/csv")
+            else:
+                st.caption("Історія порожня.")
 
 # ==========================================
 # ВКЛАДКА: МОБІЛЬНИЙ КЛІЄНТ
