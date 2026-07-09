@@ -614,8 +614,94 @@ def get_last_briefing(brigade_name):
     return max(briefs, key=lambda b: b["_dt"])
 
 # ==========================================
-# 📐 GIS EDITOR — ІНІЦІАЛІЗАЦІЯ ДАНИХ
+# ⚡ ВЗАЄМОДІЯ З УКРЕНЕРГО (СИСТЕМНИЙ ОПЕРАТОР) — ІНІЦІАЛІЗАЦІЯ ДАНИХ
 # ==========================================
+GPV_QUEUES = ["1.1", "1.2", "2.1", "2.2", "3.1", "3.2"]
+GPV_RESTRICTION_LEVELS = [
+    "Рівень не застосовується", "Рівень 1", "Рівень 2", "Рівень 3",
+    "Рівень 4", "Рівень 5", "Рівень 6",
+]
+PROTECTED_FACILITY_CATEGORIES = [
+    "1 категорія (об'єкти життєзабезпечення)",
+    "2 категорія (соціально важливі об'єкти)",
+]
+
+def generate_gpv_schedule(level_index):
+    """Генерує матрицю графіка погодинних відключень (24 години × 6 черг) для заданого
+    рівня обмеження. Формат: True = напруга є, False = відключено. level_index: 0..6."""
+    hours_off = min(level_index * 2, 20)
+    schedule = {}
+    for i, queue in enumerate(GPV_QUEUES):
+        start = (i * 4) % 24
+        off_hours = {(start + h) % 24 for h in range(hours_off)}
+        schedule[queue] = [h not in off_hours for h in range(24)]
+    return schedule
+
+if "gpv_current_level" not in st.session_state:
+    st.session_state.gpv_current_level = "Рівень 2"
+if "gpv_schedule" not in st.session_state:
+    st.session_state.gpv_schedule = generate_gpv_schedule(GPV_RESTRICTION_LEVELS.index(st.session_state.gpv_current_level))
+if "gpv_last_update" not in st.session_state:
+    st.session_state.gpv_last_update = {
+        "Час": datetime.datetime.now().strftime("%d.%m.%Y %H:%M"),
+        "Джерело": "НЕК «Укренерго» — офіційне диспетчерське розпорядження",
+        "Ким внесено": "Диспетчер Коваленко О.В.",
+    }
+if "gpv_update_log" not in st.session_state:
+    st.session_state.gpv_update_log = [dict(st.session_state.gpv_last_update, Рівень=st.session_state.gpv_current_level)]
+
+# Демонстраційна прив'язка адрес (з реєстру звернень клієнтів) до черг ГПВ
+if "gpv_address_queue_map" not in st.session_state:
+    st.session_state.gpv_address_queue_map = {
+        "київська": "1.1", "соборна": "1.2", "замостянська": "2.1",
+        "героїв майдану": "2.2", "центральна": "3.1", "шевченка": "3.2",
+        "незалежності": "1.1", "миру": "2.1",
+    }
+
+def get_queue_for_address(address_query):
+    q = address_query.strip().lower()
+    if not q:
+        return None
+    for street, queue in st.session_state.gpv_address_queue_map.items():
+        if street in q:
+            return queue
+    return None
+
+def get_off_hours_for_queue(queue):
+    sched = st.session_state.gpv_schedule.get(queue, [True] * 24)
+    return [h for h, is_on in enumerate(sched) if not is_on]
+
+if "protected_facilities" not in st.session_state:
+    st.session_state.protected_facilities = [
+        {"id": "PF-0001", "name": "КНП «Вінницька обласна клінічна лікарня»", "category": PROTECTED_FACILITY_CATEGORIES[0],
+         "address": "м. Вінниця, вул. Пирогова", "subdivision": "СО «Вінницькі міські ЕМ»",
+         "contact": "+380432550101", "latitude": 49.2280, "longitude": 28.4796},
+        {"id": "PF-0002", "name": "КП «Вінницяводоканал» (головна насосна станція)", "category": PROTECTED_FACILITY_CATEGORIES[0],
+         "address": "м. Вінниця, вул. Немирівське шосе", "subdivision": "СО «Вінницькі міські ЕМ»",
+         "contact": "+380432550202", "latitude": 49.2185, "longitude": 28.5010},
+        {"id": "PF-0003", "name": "Шаргородська центральна районна лікарня", "category": PROTECTED_FACILITY_CATEGORIES[0],
+         "address": "м. Шаргород, вул. Героїв Майдану", "subdivision": "СО «Жмеринські ЕМ»",
+         "contact": "+380432550303", "latitude": 48.7382, "longitude": 28.0798},
+        {"id": "PF-0004", "name": "Обласна станція екстреної медичної допомоги", "category": PROTECTED_FACILITY_CATEGORIES[0],
+         "address": "м. Вінниця, вул. Хмельницьке шосе", "subdivision": "СО «Вінницькі центральні ЕМ»",
+         "contact": "+380432550404", "latitude": 49.2460, "longitude": 28.4550},
+        {"id": "PF-0005", "name": "Пологовий будинок №2", "category": PROTECTED_FACILITY_CATEGORIES[0],
+         "address": "м. Вінниця, вул. Келецька", "subdivision": "СО «Вінницькі міські ЕМ»",
+         "contact": "+380432550505", "latitude": 49.2395, "longitude": 28.4635},
+        {"id": "PF-0006", "name": "КП «Хмільникводоканал»", "category": PROTECTED_FACILITY_CATEGORIES[0],
+         "address": "м. Хмільник, вул. Соборна", "subdivision": "СО «Хмільницькі ЕМ»",
+         "contact": "+380432550606", "latitude": 49.5555, "longitude": 27.9530},
+        {"id": "PF-0007", "name": "Гайсинська центральна районна лікарня", "category": PROTECTED_FACILITY_CATEGORIES[0],
+         "address": "м. Гайсин, вул. Соборна", "subdivision": "СО «Гайсинські ЕМ»",
+         "contact": "+380432550707", "latitude": 48.8115, "longitude": 29.3790},
+        {"id": "PF-0008", "name": "Міська рада (центр надання адмінпослуг)", "category": PROTECTED_FACILITY_CATEGORIES[1],
+         "address": "м. Тульчин, центральна частина", "subdivision": "СО «Тульчинські ЕМ»",
+         "contact": "+380432550808", "latitude": 48.6710, "longitude": 28.8420},
+    ]
+if "protected_facility_counter" not in st.session_state:
+    st.session_state.protected_facility_counter = len(st.session_state.protected_facilities)
+
+
 GIS_OBJECT_TYPES = ["Опора", "Підстанція", "Центр клієнтів"]
 GIS_STATUS_OPTIONS = ["Нормальна", "Попередження", "АВАРІЯ"]
 GIS_CRITICALITY_OPTIONS = ["Низька", "Середня", "Висока", "Критична"]
@@ -637,6 +723,7 @@ TAB_DEFINITIONS = {
         ("📨 Заявки клієнтів", "requests"),
         ("🚨 Сповіщення", "notifications"),
         ("🦺 Охорона праці", "safety"),
+        ("⚡ Укренерго / ГПВ", "ukrenergo"),
         ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
         ("🧠 Інтелектуальна діагностика", "diagnostics"),
@@ -650,6 +737,7 @@ TAB_DEFINITIONS = {
         ("📨 Заявки клієнтів", "requests"),
         ("🚨 Сповіщення", "notifications"),
         ("🦺 Охорона праці", "safety"),
+        ("⚡ Укренерго / ГПВ", "ukrenergo"),
         ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
         ("🧠 Інтелектуальна діагностика", "diagnostics"),
@@ -663,6 +751,7 @@ TAB_DEFINITIONS = {
         ("📨 Заявки клієнтів", "requests"),
         ("💰 CRM та Білінг", "crm"),
         ("⚖️ Енергобаланс", "energy_balance"),
+        ("⚡ Укренерго / ГПВ", "ukrenergo"),
     ],
     "brigade_tabs": [
         ("🏠 Головна", "home"),
@@ -792,6 +881,30 @@ def build_folium_map(objects, active_layers):
                 popup=folium.Popup(zone_popup, max_width=260),
             ).add_to(zone_lock_group)
         zone_lock_group.add_to(fmap)
+    if "Аварійна броня" in active_layers:
+        shield_group = folium.FeatureGroup(name="🏥 Аварійна броня (не відключати)", show=True)
+        for fac in st.session_state.get("protected_facilities", []):
+            flat, flon = fac.get("latitude"), fac.get("longitude")
+            if flat is None or flon is None:
+                continue
+            fac_popup = f"""
+            <div style="font-family:sans-serif;min-width:230px;padding:4px">
+              <b style="color:#2563eb">🏥 АВАРІЙНА БРОНЯ</b><br>
+              <b>{fac['name']}</b><hr style="margin:6px 0">
+              <table style="width:100%;font-size:12px">
+                <tr><td style="color:#666">Категорія:</td><td>{fac['category']}</td></tr>
+                <tr><td style="color:#666">Адреса:</td><td>{fac['address']}</td></tr>
+                <tr><td style="color:#666">Контакт:</td><td>{fac['contact']}</td></tr>
+              </table>
+              <p style="color:#2563eb;font-weight:bold;margin-top:6px;">НЕ ВКЛЮЧАТИ ДО ГРАФІКІВ ВІДКЛЮЧЕНЬ</p>
+            </div>"""
+            folium.Marker(
+                location=[flat, flon],
+                tooltip=folium.Tooltip(f"🏥 {fac['name']} — аварійна броня", sticky=True),
+                popup=folium.Popup(fac_popup, max_width=280),
+                icon=folium.Icon(color="blue", icon="plus-square", prefix="fa"),
+            ).add_to(shield_group)
+        shield_group.add_to(fmap)
     legend_html = """
     <div style="position:fixed;bottom:30px;left:30px;z-index:9999;background:#1e293b;color:#f1f5f9;
                 padding:12px 16px;border-radius:8px;font-size:12px;border:1px solid #334155;
@@ -803,7 +916,8 @@ def build_folium_map(objects, active_layers):
       <span style="color:#facc15">━━</span> ЛЕП 110 кВ &nbsp;
       <span style="color:#fb923c">╌╌</span> ЛЕП 35 кВ &nbsp;
       <span style="color:#4ade80">╌╌</span> КЛ 10 кВ<br>
-      <span style="color:#dc2626">◌</span> Небезпечна зона (LOTO) — заборонено подавати напругу
+      <span style="color:#dc2626">◌</span> Небезпечна зона (LOTO) — заборонено подавати напругу<br>
+      <span style="color:#2563eb">✚</span> Аварійна броня — не відключати за жодних обставин
     </div>"""
     fmap.get_root().html.add_child(folium.Element(legend_html))
     folium.LayerControl(collapsed=False).add_to(fmap)
@@ -954,16 +1068,18 @@ if "map" in tab_map:
         col_map, col_side = st.columns([2.3, 1])
         with col_map:
             st.markdown("##### 🛠️ Активні шари карти:")
-            layer_cols = st.columns(4)
+            layer_cols = st.columns(5)
             show_objects = layer_cols[0].checkbox("📍 Об'єкти мережі", value=True)
             show_lep     = layer_cols[1].checkbox("⚡ Лінії ЛЕП",      value=True)
             show_zones   = layer_cols[2].checkbox("🗺️ Зони СО",        value=False)
             show_loto    = layer_cols[3].checkbox("🔒 Небезпечні зони (LOTO)", value=True)
+            show_shield  = layer_cols[4].checkbox("🏥 Аварійна броня", value=True)
             active_layers = []
             if show_objects: active_layers.append("Об'єкти")
             if show_lep:     active_layers.append("ЛЕП")
             if show_zones:   active_layers.append("Зони СО")
             if show_loto:    active_layers.append("Небезпечні зони")
+            if show_shield:  active_layers.append("Аварійна броня")
             if FOLIUM_AVAILABLE:
                 fmap = build_folium_map(st.session_state.objects, active_layers)
                 map_result = st_folium(fmap, width="100%", height=520, returned_objects=["last_object_clicked_popup"])
@@ -1948,8 +2064,192 @@ if "safety" in tab_map:
                 st.caption("Історія порожня.")
 
 # ==========================================
-# ВКЛАДКА: МОБІЛЬНИЙ КЛІЄНТ
+# ⚡ ВКЛАДКА: ВЗАЄМОДІЯ З УКРЕНЕРГО (СИСТЕМНИЙ ОПЕРАТОР)
 # ==========================================
+if "ukrenergo" in tab_map:
+    with tab_map["ukrenergo"]:
+        st.title("⚡ Взаємодія з Укренерго — системний оператор")
+        st.caption(
+            "Диспетчерські команди вищого рівня: графіки погодинних відключень (ГПВ) від НЕК «Укренерго» "
+            "та перелік об'єктів аварійної броні, які не підлягають відключенню за жодних обставин."
+        )
+
+        can_manage_ukrenergo = user_role in ("dispatcher", "admin")
+
+        ukr_tab1, ukr_tab2 = st.tabs(["📅 Графіки погодинних відключень (ГПВ)", "🏥 Аварійна броня"])
+
+        # ─────────────────────────────────────────────────────
+        # ПІДВКЛАДКА 1: ГПВ
+        # ─────────────────────────────────────────────────────
+        with ukr_tab1:
+            st.markdown("### 📅 Графік погодинних відключень (ГПВ)")
+
+            gk1, gk2, gk3 = st.columns(3)
+            gk1.metric("⚠️ Поточний рівень обмеження", st.session_state.gpv_current_level)
+            gk2.metric("🕐 Востаннє оновлено", st.session_state.gpv_last_update["Час"])
+            gk3.metric("✍️ Ким внесено", st.session_state.gpv_last_update["Ким внесено"])
+
+            if st.session_state.gpv_current_level == "Рівень не застосовується":
+                st.success("✅ Обмежень немає — графік погодинних відключень наразі не застосовується.")
+            else:
+                st.warning(
+                    f"⚠️ Діє **{st.session_state.gpv_current_level}** обмеження споживання за розпорядженням "
+                    "НЕК «Укренерго». Черги вимикаються згідно з графіком нижче."
+                )
+
+            if can_manage_ukrenergo:
+                st.markdown("---")
+                st.markdown("#### 📥 Завантажити новий графік від Укренерго")
+                with st.form("gpv_upload_form"):
+                    ug1, ug2 = st.columns(2)
+                    new_level = ug1.selectbox("Рівень обмеження (розпорядження Укренерго):", GPV_RESTRICTION_LEVELS,
+                                               index=GPV_RESTRICTION_LEVELS.index(st.session_state.gpv_current_level))
+                    ug2.file_uploader("Файл ГПВ від Укренерго (необов'язково, .csv/.pdf):", type=["csv", "pdf"], key="gpv_file")
+                    gpv_submitted = st.form_submit_button("📥 Застосувати графік", type="primary", use_container_width=True)
+                    if gpv_submitted:
+                        st.session_state.gpv_current_level = new_level
+                        st.session_state.gpv_schedule = generate_gpv_schedule(GPV_RESTRICTION_LEVELS.index(new_level))
+                        now_dt = datetime.datetime.now()
+                        update_entry = {
+                            "Час": now_dt.strftime("%d.%m.%Y %H:%M"),
+                            "Джерело": "НЕК «Укренерго» — офіційне диспетчерське розпорядження",
+                            "Ким внесено": current_user["display_name"],
+                        }
+                        st.session_state.gpv_last_update = update_entry
+                        st.session_state.gpv_update_log.insert(0, dict(update_entry, Рівень=new_level))
+                        st.session_state.log_data.insert(0, {
+                            "Час": now_dt.strftime("%d.%m %H:%M"), "Тип": "Інспекція",
+                            "Об'єкт": "ГПВ (Укренерго)",
+                            "Опис": f"[{current_user['display_name']}] ⚡ Застосовано новий графік ГПВ від Укренерго: {new_level}.",
+                            "Критичність": "Висока" if new_level != "Рівень не застосовується" else "Низька",
+                        })
+                        st.session_state.notification_counter += 1
+                        st.session_state.notifications.insert(0, {
+                            "id": f"NOTICE-{st.session_state.notification_counter}",
+                            "Час": now_dt.strftime("%d.%m.%Y %H:%M"),
+                            "_dt": now_dt,
+                            "Відправник": current_user["display_name"],
+                            "Отримувач": "Усі бригади",
+                            "Пріоритет": "🔴 Термінове",
+                            "Канал": "📲✉️ Push + SMS",
+                            "Тема": "Зміна графіка ГПВ (Укренерго)",
+                            "Повідомлення": f"Укренерго ввело «{new_level}» обмеження. Перевірте актуальний графік ГПВ перед виїздом на об'єкти.",
+                            "Статус": "Доставлено",
+                            "Прочитано_ким": [],
+                        })
+                        st.success(f"✅ Графік ГПВ оновлено: {new_level}. Дані розіслано бригадам.")
+                        st.rerun()
+
+            st.markdown("#### 🗓️ Матриця відключень по чергах (сьогодні)")
+            hours_labels = [f"{h:02d}" for h in range(24)]
+            matrix_rows = []
+            for q in GPV_QUEUES:
+                sched = st.session_state.gpv_schedule[q]
+                matrix_rows.append({"Черга": q, **{hours_labels[h]: ("🟢" if sched[h] else "🔴") for h in range(24)}})
+            matrix_df = pd.DataFrame(matrix_rows).set_index("Черга")
+            st.dataframe(matrix_df, use_container_width=True)
+            st.caption("🟢 — напруга є · 🔴 — відключення за графіком. Кожна колонка — година доби (00–23).")
+
+            st.markdown("---")
+            st.markdown("#### 🔍 Пошук черги відключення за адресою споживача")
+            addr_query = st.text_input("Адреса або назва вулиці:", placeholder="напр. вул. Соборна")
+            if addr_query.strip():
+                found_queue = get_queue_for_address(addr_query)
+                if found_queue:
+                    off_hours = get_off_hours_for_queue(found_queue)
+                    off_ranges = ", ".join(f"{h:02d}:00–{(h+1)%24:02d}:00" for h in off_hours) if off_hours else "немає відключень"
+                    st.success(f"📍 Адреса належить до **черги {found_queue}**.")
+                    st.info(f"⏱️ Сьогоднішні відключення для черги {found_queue}: **{off_ranges}**.")
+                    notify_text = (
+                        f"Шановний споживачу! За розпорядженням НЕК «Укренерго» діє {st.session_state.gpv_current_level}. "
+                        f"Ваша адреса належить до черги {found_queue}. Заплановані відключення сьогодні: {off_ranges}. "
+                        f"АТ «Вінницяобленерго»."
+                    )
+                    st.markdown("**📨 Текст SMS/push-повідомлення для споживача:**")
+                    st.code(notify_text, language=None)
+                else:
+                    st.warning("⚠️ Адресу не знайдено в демонстраційній базі прив'язки до черг ГПВ. Спробуйте іншу вулицю (напр. Київська, Соборна, Замостянська, Героїв Майдану, Центральна, Шевченка, Незалежності, Миру).")
+
+            with st.expander("🕓 Історія оновлень графіків ГПВ"):
+                if st.session_state.gpv_update_log:
+                    st.dataframe(pd.DataFrame(st.session_state.gpv_update_log), use_container_width=True, hide_index=True)
+                else:
+                    st.caption("Історія порожня.")
+
+        # ─────────────────────────────────────────────────────
+        # ПІДВКЛАДКА 2: Аварійна броня
+        # ─────────────────────────────────────────────────────
+        with ukr_tab2:
+            st.markdown("### 🏥 Аварійна броня — об'єкти критичної інфраструктури")
+            st.caption(
+                "Лікарні, водоканали та інші об'єкти життєзабезпечення, які НЕ підлягають відключенню "
+                "за жодних обставин — незалежно від рівня обмеження ГПВ чи аварійної ситуації."
+            )
+
+            facilities = st.session_state.protected_facilities
+            fk1, fk2, fk3 = st.columns(3)
+            fk1.metric("🏥 Об'єктів аварійної броні", len(facilities))
+            fk2.metric("🩺 1 категорія (життєзабезпечення)", sum(1 for f in facilities if f["category"] == PROTECTED_FACILITY_CATEGORIES[0]))
+            fk3.metric("🏛️ 2 категорія (соц. важливі)", sum(1 for f in facilities if f["category"] == PROTECTED_FACILITY_CATEGORIES[1]))
+
+            st.error("❗ Об'єкти нижче ЗАБОРОНЕНО включати до жодної черги ГПВ та відключати дистанційно без спеціального дозволу керівництва.")
+
+            if FOLIUM_AVAILABLE:
+                shield_map = build_folium_map(st.session_state.objects, ["Об'єкти", "Аварійна броня"])
+                st_folium(shield_map, width="100%", height=460, returned_objects=[], key="shield_map")
+            else:
+                st.warning("⚠️ Бібліотеки `folium` та `streamlit-folium` не встановлені.")
+
+            st.markdown("#### 📋 Реєстр об'єктів аварійної броні")
+            f_cat = st.selectbox("Фільтр за категорією:", ["Усі"] + PROTECTED_FACILITY_CATEGORIES, key="f_shield_cat")
+            facilities_filtered = facilities if f_cat == "Усі" else [f for f in facilities if f["category"] == f_cat]
+            facilities_df = pd.DataFrame([{
+                "Назва": f["name"], "Категорія": f["category"], "Адреса": f["address"],
+                "СО": f["subdivision"], "Контакт": f["contact"],
+            } for f in facilities_filtered])
+            st.dataframe(facilities_df, use_container_width=True, hide_index=True)
+            st.download_button("📥 Завантажити реєстр аварійної броні (.csv)",
+                               data=facilities_df.to_csv(index=False).encode("utf-8"),
+                               file_name="protected_facilities.csv", mime="text/csv")
+
+            if can_manage_ukrenergo:
+                st.markdown("---")
+                st.markdown("#### ➕ Додати об'єкт до аварійної броні")
+                with st.form("add_protected_facility_form", clear_on_submit=True):
+                    pf1, pf2 = st.columns(2)
+                    pf_name = pf1.text_input("Назва об'єкта:", placeholder="напр. Міська поліклініка №3")
+                    pf_category = pf2.selectbox("Категорія:", PROTECTED_FACILITY_CATEGORIES)
+                    pf3, pf4 = st.columns(2)
+                    pf_address = pf3.text_input("Адреса:")
+                    pf_subdivision = pf4.selectbox("Структурна одиниця (СО):", list(st.session_state.org_structure.keys()))
+                    pf5, pf6, pf7 = st.columns(3)
+                    pf_contact = pf5.text_input("Контактний телефон:", placeholder="+380...")
+                    pf_lat = pf6.number_input("Широта (N):", value=49.2331, format="%.5f", step=0.0001)
+                    pf_lon = pf7.number_input("Довгота (E):", value=28.4682, format="%.5f", step=0.0001)
+                    pf_submitted = st.form_submit_button("➕ Додати до аварійної броні", type="primary", use_container_width=True)
+                    if pf_submitted:
+                        if not pf_name.strip():
+                            st.error("❌ Вкажіть назву об'єкта.")
+                        else:
+                            st.session_state.protected_facility_counter += 1
+                            st.session_state.protected_facilities.append({
+                                "id": f"PF-{st.session_state.protected_facility_counter:04d}",
+                                "name": pf_name.strip(), "category": pf_category,
+                                "address": pf_address.strip() or "Не вказано", "subdivision": pf_subdivision,
+                                "contact": pf_contact.strip() or "Не вказано",
+                                "latitude": round(float(pf_lat), 5), "longitude": round(float(pf_lon), 5),
+                            })
+                            now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
+                            st.session_state.log_data.insert(0, {
+                                "Час": now_str, "Тип": "Інспекція",
+                                "Об'єкт": pf_name.strip(),
+                                "Опис": f"[{current_user['display_name']}] 🏥 Об'єкт «{pf_name.strip()}» внесено до аварійної броні ({pf_category}). Відключення заборонено.",
+                                "Критичність": "Висока",
+                            })
+                            st.success(f"✅ Об'єкт «{pf_name.strip()}» додано до аварійної броні.")
+                            st.rerun()
+
+
 if "geo_arrived" not in st.session_state:
     st.session_state.geo_arrived = False
 if "geo_lat" not in st.session_state:
