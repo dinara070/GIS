@@ -701,6 +701,104 @@ if "protected_facilities" not in st.session_state:
 if "protected_facility_counter" not in st.session_state:
     st.session_state.protected_facility_counter = len(st.session_state.protected_facilities)
 
+# ==========================================
+# 🎓 НАВЧАННЯ ТА ТЕСТУВАННЯ (LMS) — ІНІЦІАЛІЗАЦІЯ ДАНИХ
+# ==========================================
+LMS_PASS_THRESHOLD_PCT = 80
+LMS_CERT_VALIDITY_DAYS = 365
+LMS_TEST_QUESTIONS_COUNT = 5
+LMS_TOPICS = ["ПТБ", "ПЕЕ", "Пожежна безпека", "Домедична допомога"]
+
+LMS_QUESTION_BANK = [
+    {"id": "Q01", "topic": "ПТБ",
+     "question": "Перед початком робіт на відключеній ділянці мережі бригада повинна:",
+     "options": ["Перевірити відсутність напруги покажчиком напруги", "Розпочати роботи одразу",
+                 "Зняти засоби захисту", "Викликати диспетчера лише після завершення робіт"], "correct": 0},
+    {"id": "Q02", "topic": "ПТБ",
+     "question": "Хто має право видавати наряд-допуск на роботи в діючих електроустановках?",
+     "options": ["Будь-який працівник бригади", "Відповідальний керівник робіт",
+                 "Водій службового автомобіля", "Клієнт"], "correct": 1},
+    {"id": "Q03", "topic": "ПТБ",
+     "question": "Мінімальний склад бригади для робіт в електроустановках напругою понад 1000 В — не менше:",
+     "options": ["1 особи", "2 осіб", "5 осіб", "10 осіб"], "correct": 1},
+    {"id": "Q04", "topic": "ПТБ",
+     "question": "Знак «Не вмикати! Працюють люди» встановлюється:",
+     "options": ["На комутаційних апаратах, з яких знято напругу для проведення робіт", "На в'їзді до диспетчерської",
+                 "На особистому автомобілі бригадира", "На складі ЗІЗ"], "correct": 0},
+    {"id": "Q05", "topic": "ПЕЕ",
+     "question": "Планове технічне обслуговування силового трансформатора проводиться згідно з:",
+     "options": ["Особистим бажанням електромонтера", "Графіком ПЕЕ (Правил експлуатації електроустановок)",
+                 "Лише погодними умовами", "Рішенням клієнта"], "correct": 1},
+    {"id": "Q06", "topic": "ПЕЕ",
+     "question": "Термін періодичної перевірки діелектричних рукавичок становить:",
+     "options": ["1 місяць", "6 місяців", "5 років", "Не перевіряються"], "correct": 1},
+    {"id": "Q07", "topic": "Пожежна безпека",
+     "question": "У разі загоряння електроустановки під напругою забороняється гасити вогонь:",
+     "options": ["Вуглекислотним вогнегасником", "Порошковим вогнегасником", "Водою", "Піском"], "correct": 2},
+    {"id": "Q08", "topic": "Пожежна безпека",
+     "question": "Первинні засоби пожежогасіння на об'єкті електромереж повинні перевірятися:",
+     "options": ["Ніколи", "Раз на 5 років", "Регулярно згідно з графіком", "Тільки після пожежі"], "correct": 2},
+    {"id": "Q09", "topic": "Домедична допомога",
+     "question": "Перша дія при виявленні потерпілого під напругою:",
+     "options": ["Негайно доторкнутися голими руками", "Знеструмити ділянку або відтягнути потерпілого ізольованим предметом",
+                 "Залишити до приїзду швидкої", "Полити водою"], "correct": 1},
+    {"id": "Q10", "topic": "Домедична допомога",
+     "question": "Ознака зупинки серця, за якої необхідно розпочати непрямий масаж серця:",
+     "options": ["Відсутність дихання та пульсу", "Легкий кашель", "Почервоніння шкіри", "Позіхання"], "correct": 0},
+]
+
+EMPLOYEE_ROSTER = [
+    {"id": "EMP-001", "name": "Сидоренко В.П.", "position": "Бригадир", "brigade": BRIGADE_NAMES[0]},
+    {"id": "EMP-002", "name": "Іванов О.М.", "position": "Електромонтер", "brigade": BRIGADE_NAMES[0]},
+    {"id": "EMP-003", "name": "Петров С.В.", "position": "Електромонтер", "brigade": BRIGADE_NAMES[0]},
+    {"id": "EMP-004", "name": "Мельник Т.С.", "position": "Бригадир", "brigade": BRIGADE_NAMES[1]},
+    {"id": "EMP-005", "name": "Коваль Р.І.", "position": "Електромонтер", "brigade": BRIGADE_NAMES[1]},
+    {"id": "EMP-006", "name": "Бондаренко Д.О.", "position": "Електромонтер", "brigade": BRIGADE_NAMES[1]},
+]
+
+if "lms_test_attempts" not in st.session_state:
+    _now_lms = datetime.datetime.now()
+    st.session_state.lms_test_attempts = []
+    _lms_seed = [
+        ("EMP-001", 200, 90), ("EMP-002", 340, 85), ("EMP-003", 400, 82),
+        ("EMP-004", 50, 100), ("EMP-006", 10, 90),
+    ]
+    _lms_id = 0
+    for _emp_id, _days_ago, _score in _lms_seed:
+        _lms_id += 1
+        _emp = next(e for e in EMPLOYEE_ROSTER if e["id"] == _emp_id)
+        _dt = _now_lms - datetime.timedelta(days=_days_ago)
+        st.session_state.lms_test_attempts.append({
+            "id": f"LMS-{_lms_id:04d}", "employee_id": _emp_id, "employee_name": _emp["name"],
+            "brigade": _emp["brigade"], "topic": "Змішана (усі теми)",
+            "Дата": _dt.strftime("%d.%m.%Y"), "_dt": _dt,
+            "correct_count": round(_score / 100 * LMS_TEST_QUESTIONS_COUNT),
+            "total_count": LMS_TEST_QUESTIONS_COUNT, "score_pct": _score,
+            "passed": _score >= LMS_PASS_THRESHOLD_PCT,
+        })
+    # EMP-005 навмисно ніколи не проходив тестування — демонстраційний сценарій "🔴 Не атестований".
+if "lms_test_counter" not in st.session_state:
+    st.session_state.lms_test_counter = len(st.session_state.lms_test_attempts)
+if "lms_current_test" not in st.session_state:
+    st.session_state.lms_current_test = None
+
+def get_latest_passed_attempt(employee_id):
+    passed = [a for a in st.session_state.lms_test_attempts if a["employee_id"] == employee_id and a["passed"]]
+    if not passed:
+        return None
+    return max(passed, key=lambda a: a["_dt"])
+
+def get_certification_status(employee_id):
+    latest = get_latest_passed_attempt(employee_id)
+    if latest is None:
+        return "🔴 Не атестований", "#ef4444", None
+    days_left = (latest["_dt"].date() + datetime.timedelta(days=LMS_CERT_VALIDITY_DAYS) - datetime.date.today()).days
+    if days_left < 0:
+        return "🔴 Прострочено", "#ef4444", days_left
+    if days_left <= 30:
+        return "🟡 Термін спливає", "#f59e0b", days_left
+    return "🟢 Атестований", "#22c55e", days_left
+
 
 GIS_OBJECT_TYPES = ["Опора", "Підстанція", "Центр клієнтів"]
 GIS_STATUS_OPTIONS = ["Нормальна", "Попередження", "АВАРІЯ"]
@@ -723,6 +821,7 @@ TAB_DEFINITIONS = {
         ("📨 Заявки клієнтів", "requests"),
         ("🚨 Сповіщення", "notifications"),
         ("🦺 Охорона праці", "safety"),
+        ("🎓 Навчання та Тестування", "lms"),
         ("⚡ Укренерго / ГПВ", "ukrenergo"),
         ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
@@ -737,6 +836,7 @@ TAB_DEFINITIONS = {
         ("📨 Заявки клієнтів", "requests"),
         ("🚨 Сповіщення", "notifications"),
         ("🦺 Охорона праці", "safety"),
+        ("🎓 Навчання та Тестування", "lms"),
         ("⚡ Укренерго / ГПВ", "ukrenergo"),
         ("📱 Мобільний клієнт", "mobile"),
         ("🏛️ Структура компанії", "structure"), ("📊 Аналітика та KPI", "analytics"),
@@ -758,6 +858,7 @@ TAB_DEFINITIONS = {
         ("📨 Заявки клієнтів", "requests"),
         ("🚨 Сповіщення", "notifications"),
         ("🦺 Охорона праці", "safety"),
+        ("🎓 Навчання та Тестування", "lms"),
         ("📱 Мобільний клієнт", "mobile"),
     ],
 }
@@ -2248,6 +2349,228 @@ if "ukrenergo" in tab_map:
                             })
                             st.success(f"✅ Об'єкт «{pf_name.strip()}» додано до аварійної броні.")
                             st.rerun()
+
+# ==========================================
+# 🎓 ВКЛАДКА: НАВЧАННЯ ТА ТЕСТУВАННЯ (LMS)
+# ==========================================
+if "lms" in tab_map:
+    with tab_map["lms"]:
+        st.title("🎓 Навчання та Тестування — LMS")
+        st.caption(
+            "Щорічна перевірка знань працівників бригад з ПТБ, ПЕЕ, пожежної безпеки та домедичної "
+            f"допомоги. Прохідний бал — {LMS_PASS_THRESHOLD_PCT}%. Атестація дійсна "
+            f"{LMS_CERT_VALIDITY_DAYS // 365} рік із дати успішного складання."
+        )
+
+        lms_tab1, lms_tab2 = st.tabs(["📝 Пройти тест", "📊 Результати та атестація"])
+
+        # ─────────────────────────────────────────────────────
+        # ПІДВКЛАДКА 1: Пройти тест
+        # ─────────────────────────────────────────────────────
+        with lms_tab1:
+            st.markdown("### 📝 Тестування знань з охорони праці")
+
+            if st.session_state.lms_current_test is None:
+                if user_role == "brigade":
+                    roster_options = [e for e in EMPLOYEE_ROSTER if e["brigade"] == current_user["subdivision"]]
+                else:
+                    roster_options = EMPLOYEE_ROSTER
+
+                if not roster_options:
+                    st.info("Немає працівників, доступних для тестування у вашому підрозділі.")
+                else:
+                    ts1, ts2 = st.columns(2)
+                    emp_labels = [f"{e['name']} ({e['position']}, {e['brigade']})" for e in roster_options]
+                    emp_choice = ts1.selectbox("Працівник:", emp_labels, key="lms_emp_choice")
+                    selected_emp = roster_options[emp_labels.index(emp_choice)]
+                    topic_choice = ts2.selectbox("Тема тесту:", ["Змішана (усі теми)"] + LMS_TOPICS, key="lms_topic_choice")
+
+                    cert_label, cert_color, cert_days = get_certification_status(selected_emp["id"])
+                    days_suffix = f" (залишилось {cert_days} дн.)" if cert_days is not None and cert_days >= 0 else (
+                        f" (прострочено на {abs(cert_days)} дн.)" if cert_days is not None else ""
+                    )
+                    st.markdown(
+                        f"**Поточний статус атестації:** "
+                        f"<span style='color:{cert_color};font-weight:bold'>{cert_label}</span>{days_suffix}",
+                        unsafe_allow_html=True
+                    )
+
+                    if st.button("🎯 Розпочати тест", type="primary", use_container_width=True):
+                        pool = LMS_QUESTION_BANK if topic_choice == "Змішана (усі теми)" else [
+                            q for q in LMS_QUESTION_BANK if q["topic"] == topic_choice
+                        ]
+                        n = min(LMS_TEST_QUESTIONS_COUNT, len(pool))
+                        selected_questions = _rnd.sample(pool, n)
+                        st.session_state.lms_current_test = {
+                            "employee_id": selected_emp["id"], "employee_name": selected_emp["name"],
+                            "brigade": selected_emp["brigade"], "topic": topic_choice,
+                            "questions": selected_questions,
+                        }
+                        st.rerun()
+            else:
+                test = st.session_state.lms_current_test
+                st.info(
+                    f"🧑‍🔧 Працівник: **{test['employee_name']}** ({test['brigade']}) · "
+                    f"Тема: **{test['topic']}** · Питань: {len(test['questions'])}"
+                )
+                with st.form("lms_test_form"):
+                    answers = {}
+                    for i, q in enumerate(test["questions"]):
+                        st.markdown(f"**{i + 1}. {q['question']}**")
+                        answers[q["id"]] = st.radio(
+                            f"Варіант відповіді на питання {i + 1}:", q["options"],
+                            key=f"lms_answer_{q['id']}", label_visibility="collapsed", index=None
+                        )
+                        st.markdown("")
+                    col_submit, col_cancel = st.columns(2)
+                    test_submitted = col_submit.form_submit_button(
+                        "✅ Завершити тест і надіслати відповіді", type="primary", use_container_width=True
+                    )
+                    test_cancelled = col_cancel.form_submit_button("❌ Скасувати тест", use_container_width=True)
+
+                if test_cancelled:
+                    st.session_state.lms_current_test = None
+                    st.rerun()
+
+                if test_submitted:
+                    unanswered = [i + 1 for i, q in enumerate(test["questions"]) if answers[q["id"]] is None]
+                    if unanswered:
+                        st.error(
+                            "❌ Дайте відповідь на всі питання перед завершенням тесту "
+                            f"(не відповіли на: {', '.join(map(str, unanswered))})."
+                        )
+                    else:
+                        correct_count = sum(
+                            1 for q in test["questions"]
+                            if q["options"].index(answers[q["id"]]) == q["correct"]
+                        )
+                        total = len(test["questions"])
+                        score_pct = round(correct_count / total * 100)
+                        passed = score_pct >= LMS_PASS_THRESHOLD_PCT
+
+                        st.session_state.lms_test_counter += 1
+                        now_dt = datetime.datetime.now()
+                        st.session_state.lms_test_attempts.insert(0, {
+                            "id": f"LMS-{st.session_state.lms_test_counter:04d}",
+                            "employee_id": test["employee_id"], "employee_name": test["employee_name"],
+                            "brigade": test["brigade"], "topic": test["topic"],
+                            "Дата": now_dt.strftime("%d.%m.%Y"), "_dt": now_dt,
+                            "correct_count": correct_count, "total_count": total,
+                            "score_pct": score_pct, "passed": passed,
+                        })
+                        st.session_state.log_data.insert(0, {
+                            "Час": now_dt.strftime("%d.%m %H:%M"), "Тип": "Інспекція",
+                            "Об'єкт": f"Атестація: {test['employee_name']}",
+                            "Опис": (
+                                f"[{current_user['display_name']}] 🎓 {test['employee_name']} ({test['brigade']}) "
+                                f"пройшов тест «{test['topic']}»: {correct_count}/{total} ({score_pct}%) — "
+                                f"{'СКЛАДЕНО' if passed else 'НЕ СКЛАДЕНО'}."
+                            ),
+                            "Критичність": "Низька" if passed else "Висока",
+                        })
+                        st.session_state.lms_current_test = None
+
+                        if passed:
+                            st.success(
+                                f"🎉 Тест складено! Результат: {correct_count}/{total} ({score_pct}%). "
+                                f"Атестація дійсна {LMS_CERT_VALIDITY_DAYS} днів від сьогодні."
+                            )
+                            st.balloons()
+                        else:
+                            st.error(
+                                f"❌ Тест не складено. Результат: {correct_count}/{total} ({score_pct}%). "
+                                f"Потрібно набрати щонайменше {LMS_PASS_THRESHOLD_PCT}%. Спробуйте ще раз."
+                            )
+
+        # ─────────────────────────────────────────────────────
+        # ПІДВКЛАДКА 2: Результати та атестація
+        # ─────────────────────────────────────────────────────
+        with lms_tab2:
+            st.markdown("### 📊 Результати тестування та статус атестації")
+
+            cert_rows = []
+            for emp in EMPLOYEE_ROSTER:
+                label, color, days_left = get_certification_status(emp["id"])
+                latest = get_latest_passed_attempt(emp["id"])
+                cert_rows.append({
+                    "ПІБ": emp["name"], "Посада": emp["position"], "Бригада": emp["brigade"],
+                    "Останній успішний тест": latest["Дата"] if latest else "—",
+                    "Результат, %": latest["score_pct"] if latest else "—",
+                    "Днів до переатестації": days_left if days_left is not None else "—",
+                    "Статус": label,
+                })
+
+            atestated = sum(1 for r in cert_rows if r["Статус"] == "🟢 Атестований")
+            expiring = sum(1 for r in cert_rows if r["Статус"] == "🟡 Термін спливає")
+            overdue = sum(1 for r in cert_rows if r["Статус"] in ("🔴 Прострочено", "🔴 Не атестований"))
+
+            lk1, lk2, lk3, lk4 = st.columns(4)
+            lk1.metric("👷 Працівників на обліку", len(cert_rows))
+            lk2.metric("🟢 Атестовано", atestated)
+            lk3.metric("🟡 Термін спливає", expiring)
+            lk4.metric("🔴 Не атестовано / прострочено", overdue, delta_color="inverse")
+
+            if overdue:
+                overdue_names = ", ".join(r["ПІБ"] for r in cert_rows if r["Статус"] in ("🔴 Прострочено", "🔴 Не атестований"))
+                st.error(
+                    f"🚨 Потребують негайного тестування: **{overdue_names}**. Допуск до самостійних робіт "
+                    "під напругою без чинної атестації заборонено."
+                )
+            elif expiring:
+                st.warning(f"⚠️ {expiring} працівник(ів) мають незабаром прострочену атестацію.")
+            else:
+                st.success("✅ Усі працівники атестовані.")
+
+            def _color_cert_status(val):
+                colors = {"🟢 Атестований": "#22c55e", "🟡 Термін спливає": "#f59e0b",
+                          "🔴 Прострочено": "#ef4444", "🔴 Не атестований": "#ef4444"}
+                return f"color: {colors.get(val, '#94a3b8')}; font-weight: bold"
+
+            st.dataframe(pd.DataFrame(cert_rows).style.map(_color_cert_status, subset=["Статус"]),
+                         use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+            st.markdown("#### 📈 Середній бал за темами")
+            topic_scores = {}
+            for t in LMS_TOPICS + ["Змішана (усі теми)"]:
+                attempts_t = [a["score_pct"] for a in st.session_state.lms_test_attempts if a["topic"] == t]
+                if attempts_t:
+                    topic_scores[t] = sum(attempts_t) / len(attempts_t)
+
+            if topic_scores:
+                fig_lms, ax_lms = plt.subplots(figsize=(8, 3.2))
+                fig_lms.patch.set_facecolor("#0f172a")
+                ax_lms.set_facecolor("#1e293b")
+                bar_colors_lms = ["#22c55e" if v >= LMS_PASS_THRESHOLD_PCT else "#ef4444" for v in topic_scores.values()]
+                bars_lms = ax_lms.bar(list(topic_scores.keys()), list(topic_scores.values()), color=bar_colors_lms, width=0.5, edgecolor="#0f172a")
+                ax_lms.bar_label(bars_lms, fmt="%.0f%%", color="#e2e8f0", fontsize=9, padding=3)
+                ax_lms.axhline(y=LMS_PASS_THRESHOLD_PCT, color="#94a3b8", linestyle="--", linewidth=1,
+                               label=f"Поріг складання {LMS_PASS_THRESHOLD_PCT}%")
+                ax_lms.set_ylabel("Середній бал, %", color="#64748b", fontsize=8)
+                ax_lms.tick_params(colors="#94a3b8", labelsize=8)
+                ax_lms.spines[:].set_color("#334155")
+                ax_lms.legend(fontsize=7.5, facecolor="#1e293b", edgecolor="#334155", labelcolor="#cbd5e1")
+                ax_lms.grid(True, alpha=0.1, color="#334155", axis="y")
+                ax_lms.set_ylim(0, 105)
+                plt.tight_layout()
+                st.pyplot(fig_lms)
+                plt.close(fig_lms)
+            else:
+                st.caption("Ще немає результатів тестування.")
+
+            with st.expander("🕓 Історія всіх спроб тестування"):
+                if st.session_state.lms_test_attempts:
+                    hist_df = pd.DataFrame([{
+                        "Працівник": a["employee_name"], "Бригада": a["brigade"], "Тема": a["topic"],
+                        "Дата": a["Дата"], "Результат": f"{a['correct_count']}/{a['total_count']}",
+                        "%": a["score_pct"], "Статус": "✅ Складено" if a["passed"] else "❌ Не складено",
+                    } for a in st.session_state.lms_test_attempts])
+                    st.dataframe(hist_df, use_container_width=True, hide_index=True)
+                    st.download_button("📥 Завантажити історію тестування (.csv)",
+                                       data=hist_df.to_csv(index=False).encode("utf-8"),
+                                       file_name="lms_test_history.csv", mime="text/csv")
+                else:
+                    st.caption("Історія порожня.")
 
 
 if "geo_arrived" not in st.session_state:
