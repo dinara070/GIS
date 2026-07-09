@@ -21,6 +21,23 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+st.markdown("""
+<style>
+/* Суцільна риска під усіма вкладками меню — включно з тими, що виходять за межі
+   видимої області та доступні через прокрутку/стрілку "›" (інакше в них риска зникає). */
+.stTabs [data-baseweb="tab-list"] {
+    border-bottom: 1px solid #334155;
+    gap: 4px;
+}
+.stTabs [data-baseweb="tab-list"] button[data-baseweb="tab"] {
+    border-bottom: 1px solid #334155 !important;
+}
+.stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
+    border-bottom: 2px solid #ef4444 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 plt.style.use('dark_background')
 
 # ==========================================
