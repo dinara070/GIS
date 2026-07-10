@@ -812,6 +812,131 @@ if "gis_edit_log" not in st.session_state:
     st.session_state.gis_edit_log = []
 
 # ==========================================
+# 📄 ДИСПЕТЧЕРСЬКА ДОКУМЕНТАЦІЯ (DOCUMENT MANAGEMENT) — ІНІЦІАЛІЗАЦІЯ ДАНИХ
+# ==========================================
+PERMIT_WORK_TYPES = [
+    "Планове технічне обслуговування", "Аварійно-відновлювальні роботи",
+    "Заміна обладнання", "Огляд / діагностика", "Земляні роботи поблизу мереж",
+    "Роботи під напругою (ПУН)", "Роботи зі зняттям напруги",
+]
+PERMIT_STATUS_FLOW = ["Чернетка", "Погоджено диспетчером", "Видано бригаді", "У виконанні", "Закрито", "Скасовано"]
+PERMIT_STATUS_COLORS = {
+    "Чернетка": "#94a3b8", "Погоджено диспетчером": "#38bdf8", "Видано бригаді": "#a855f7",
+    "У виконанні": "#f59e0b", "Закрито": "#22c55e", "Скасовано": "#ef4444",
+}
+
+def _next_permit_expiry_str(days=1):
+    return (datetime.datetime.now() + datetime.timedelta(days=days)).strftime("%d.%m.%Y %H:%M")
+
+if "permits" not in st.session_state:
+    _rnd.seed(555)
+    _now_p = datetime.datetime.now()
+    st.session_state.permits = []
+    _seed_permits = [
+        # (об'єкт, вид робіт, статус, дата видачі (дні тому), бригада, керівник робіт, допускач, склад)
+        ("ТП-Шаргород-100", "Планове технічне обслуговування", "У виконанні", 0,
+         BRIGADE_NAMES[1], "Мельник Т.С.", "Диспетчер Коваленко О.В.",
+         "Мельник Т.С., Коваль Р.І., Бондаренко Д.О."),
+        ("ТП-245", "Аварійно-відновлювальні роботи", "Видано бригаді", 0,
+         BRIGADE_NAMES[0], "Сидоренко В.П.", "Диспетчер Коваленко О.В.",
+         "Сидоренко В.П., Іванов О.М."),
+        ("Оп. №9", "Огляд / діагностика", "Закрито", 3,
+         BRIGADE_NAMES[0], "Сидоренко В.П.", "Диспетчер Коваленко О.В.",
+         "Сидоренко В.П., Петров С.В."),
+    ]
+    for i, (obj_name, wtype, status, days_ago, brigade, leader, admitter, crew) in enumerate(_seed_permits):
+        st.session_state.permits.append({
+            "id": f"PERMIT-{2026}{i+1:04d}",
+            "Об'єкт": obj_name,
+            "Вид робіт": wtype,
+            "Зміст завдання": f"Виконання робіт: {wtype.lower()} на об'єкті «{obj_name}».",
+            "Заходи безпеки": "Заземлення встановлено, знято напругу, вивішено плакати безпеки, огороджено робочу зону.",
+            "Особливі умови": "—",
+            "Відповідальний керівник робіт": leader,
+            "Допускач": admitter,
+            "Бригада": brigade,
+            "Склад бригади": crew,
+            "Дата видачі": (_now_p - datetime.timedelta(days=days_ago)).strftime("%d.%m.%Y %H:%M"),
+            "Термін дії до": (_now_p - datetime.timedelta(days=days_ago) + datetime.timedelta(days=1)).strftime("%d.%m.%Y %H:%M"),
+            "Статус": status,
+            "Підпис допускача": True,
+            "Підпис керівника робіт": status in ("Видано бригаді", "У виконанні", "Закрито"),
+            "Підпис бригадира (отримання)": status in ("У виконанні", "Закрито"),
+            "Дата закриття": (_now_p - datetime.timedelta(days=days_ago) + datetime.timedelta(hours=6)).strftime("%d.%m.%Y %H:%M") if status == "Закрито" else None,
+            "Звіт про виконання": "Роботи виконано в повному обсязі, зауважень немає." if status == "Закрито" else "",
+            "Створив": "Диспетчер Коваленко О.В.",
+            "_created_dt": _now_p - datetime.timedelta(days=days_ago),
+        })
+if "permit_counter" not in st.session_state:
+    st.session_state.permit_counter = len(st.session_state.permits)
+
+def get_permit_status_color(status):
+    return PERMIT_STATUS_COLORS.get(status, "#94a3b8")
+
+# ── Бібліотека нормативної документації (ПУЕ / ПТЕ / ПТБ) ──
+NORMATIVE_LIBRARY = [
+    {"код": "ПУЕ", "розділ": "1.7", "назва": "Заземлення та захисні заходи електробезпеки",
+     "текст": "Усі металеві неструмовідні частини електроустановок, які можуть опинитися під напругою, "
+              "підлягають заземленню або занулюванню. Опір заземлювального пристрою в електроустановках "
+              "напругою до 1000 В не повинен перевищувати 4 Ом (при потужності джерела до 100 кВА — 10 Ом).",
+     "теги": ["заземлення", "електробезпека", "опір"]},
+    {"код": "ПУЕ", "розділ": "2.4", "назва": "Повітряні лінії електропередачі напругою до 1 кВ",
+     "текст": "Габарит повітряної лінії до поверхні землі в населеній місцевості повинен бути не менше 6 м, "
+              "поза населеною місцевістю — не менше 5 м. Перетин з дорогами вимагає додаткового погодження "
+              "з балансоутримувачем дороги.",
+     "теги": ["ЛЕП", "габарити", "повітряні лінії"]},
+    {"код": "ПУЕ", "розділ": "4.2", "назва": "Розподільчі пристрої та підстанції",
+     "текст": "Розподільчі пристрої повинні мати огородження, що виключає доступ сторонніх осіб до "
+              "струмовідних частин. Двері приміщень РП повинні відкриватися назовні та мати самозамикальні замки.",
+     "теги": ["РП", "підстанція", "огородження"]},
+    {"код": "ПТЕ", "розділ": "3.1", "назва": "Технічне обслуговування силових трансформаторів",
+     "текст": "Планове технічне обслуговування силових трансформаторів проводиться не рідше одного разу "
+              "на 6 місяців. Позачергове обслуговування призначається після спрацювання газового захисту "
+              "або виявлення відхилень параметрів масла.",
+     "теги": ["трансформатор", "ТО", "графік"]},
+    {"код": "ПТЕ", "розділ": "3.4", "назва": "Експлуатація повітряних ліній електропередачі",
+     "текст": "Огляди повітряних ліній без підйому на опори проводяться не рідше 1 разу на 6 місяців. "
+              "Позачергові огляди призначаються після стихійних явищ (гроза, ожеледь, ураганний вітер).",
+     "теги": ["ЛЕП", "огляд", "графік"]},
+    {"код": "ПТЕ", "розділ": "5.2", "назва": "Оперативні перемикання в електроустановках",
+     "текст": "Оперативні перемикання виконуються за розпорядженням або за бланком перемикань, "
+              "складеним відповідно до затвердженої диспетчерської схеми. Самовільні перемикання без "
+              "дозволу вищого оперативного персоналу забороняються.",
+     "теги": ["перемикання", "диспетчер", "бланк перемикань"]},
+    {"код": "ПТБ", "розділ": "2.1", "назва": "Порядок оформлення наряду-допуску",
+     "текст": "Наряд-допуск оформлюється на бланку встановленого зразка, підписується особою, яка видає наряд "
+              "(допускачем), відповідальним керівником робіт та виконавцем робіт. Термін дії наряду-допуску — "
+              "не більше 15 календарних днів з можливістю продовження на один термін.",
+     "теги": ["наряд-допуск", "оформлення", "термін дії"]},
+    {"код": "ПТБ", "розділ": "2.3", "назва": "Обов'язки допускача перед початком робіт",
+     "текст": "Допускач зобов'язаний перевірити виконання технічних заходів (відключення, заземлення, "
+              "огородження, вивішування плакатів безпеки), провести цільовий інструктаж бригади та "
+              "зробити запис у оперативному журналі про допуск бригади до роботи.",
+     "теги": ["допускач", "інструктаж", "допуск"]},
+    {"код": "ПТБ", "розділ": "3.5", "назва": "Мінімальний склад бригади",
+     "текст": "Для робіт в діючих електроустановках напругою понад 1000 В мінімальний склад бригади — "
+              "не менше 2 осіб: виробник робіт (спостерігач) та не менше одного члена бригади. При роботах "
+              "під напругою (ПУН) склад бригади визначається окремою технологічною картою.",
+     "теги": ["бригада", "склад", "ПУН"]},
+    {"код": "ПТБ", "розділ": "4.2", "назва": "Засоби індивідуального захисту (ЗІЗ)",
+     "текст": "Перед початком робіт бригада зобов'язана перевірити справність та термін дії засобів захисту: "
+              "діелектричні рукавички (перевірка кожні 6 місяців), діелектричний килимок, ізолювальна штанга, "
+              "покажчик напруги. Використання ЗІЗ з простроченим терміном випробувань категорично забороняється.",
+     "теги": ["ЗІЗ", "рукавички", "перевірка"]},
+    {"код": "ПТБ", "розділ": "5.1", "назва": "Порядок закриття наряду-допуску",
+     "текст": "Наряд-допуск закривається після повного завершення робіт, зняття тимчасових огороджень і "
+              "плакатів, виведення бригади з робочого місця. Закриття оформлюється підписом відповідального "
+              "керівника робіт та фіксується допускачем в оперативному журналі із зазначенням часу закриття.",
+     "теги": ["закриття наряду", "оперативний журнал"]},
+    {"код": "ПТБ", "розділ": "6.2", "назва": "Дії при виявленні потерпілого від електроструму",
+     "текст": "Перша дія — негайно знеструмити ділянку або звільнити потерпілого від дії струму, "
+              "використовуючи ізолювальні засоби (суху дерев'яну палицю, одяг). Забороняється торкатися "
+              "потерпілого голими руками, доки не знято напругу.",
+     "теги": ["домедична допомога", "ураження струмом", "безпека"]},
+]
+NORMATIVE_CODES = sorted(set(d["код"] for d in NORMATIVE_LIBRARY))
+
+# ==========================================
 # ГОЛОВНЕ МЕНЮ
 # ==========================================
 TAB_DEFINITIONS = {
@@ -821,6 +946,7 @@ TAB_DEFINITIONS = {
         ("📨 Заявки клієнтів", "requests"),
         ("🚨 Сповіщення", "notifications"),
         ("🦺 Охорона праці", "safety"),
+        ("📄 Диспетчерська документація", "documents"),
         ("🎓 Навчання та Тестування", "lms"),
         ("⚡ Укренерго / ГПВ", "ukrenergo"),
         ("📱 Мобільний клієнт", "mobile"),
@@ -836,6 +962,7 @@ TAB_DEFINITIONS = {
         ("📨 Заявки клієнтів", "requests"),
         ("🚨 Сповіщення", "notifications"),
         ("🦺 Охорона праці", "safety"),
+        ("📄 Диспетчерська документація", "documents"),
         ("🎓 Навчання та Тестування", "lms"),
         ("⚡ Укренерго / ГПВ", "ukrenergo"),
         ("📱 Мобільний клієнт", "mobile"),
@@ -858,6 +985,7 @@ TAB_DEFINITIONS = {
         ("📨 Заявки клієнтів", "requests"),
         ("🚨 Сповіщення", "notifications"),
         ("🦺 Охорона праці", "safety"),
+        ("📄 Диспетчерська документація", "documents"),
         ("🎓 Навчання та Тестування", "lms"),
         ("📱 Мобільний клієнт", "mobile"),
     ],
@@ -1100,6 +1228,7 @@ if "home" in tab_map:
                 ("📐","GIS Editor","Додавання нових об'єктів мережі (опор, ТП) прямо на мапі кліком, без звернення до ІТ-відділу."),
                 ("🔌","Графік відключень (ГПВ)","Управління черговими графіками погодинних відключень за рівнями обмежень Укренерго, пошук черги за адресою, журнал виконання."),
                 ("📱","Мобільний клієнт бригади","Цифровий наряд-допуск для виїзних бригад: чек-лист безпеки, звіт про виконану роботу."),
+                ("📄","Диспетчерська документація","Електронний архів нарядів-допусків з погодженням та ЕЦП, бібліотека ПУЕ/ПТЕ/ПТБ з пошуком."),
                 ("🌡️","SmartGrid AI — Аналітика","Симуляція навантаження залежно від температури (-20°C…+40°C), детекція аномалій напруги, Threshold Alerts."),
                 ("💰","CRM та Білінг","Дашборд оплат, теплова карта боргів по дільницях, калькулятор тарифних зон (2/3-зонний лічильник)."),
                 ("📋","Журнал подій","Повний аудит-лог з фільтрацією за типом події, критичністю та об'єктом."),
@@ -1253,6 +1382,7 @@ if "map" in tab_map:
             st.download_button(label="📄 Завантажити Наряд-Допуск (.txt)",
                                data=permit_text, file_name=f"permit_{obj.get('name','TP')}.txt",
                                mime="text/plain", use_container_width=True)
+            st.caption("ℹ️ Повноцінне оформлення, погодження та архівація нарядів-допусків — на вкладці «📄 Диспетчерська документація».")
 
 # ==========================================
 # 📐 ВКЛАДКА: GIS EDITOR (тільки Адмін)
@@ -2163,6 +2293,384 @@ if "safety" in tab_map:
                                    file_name="danger_zones_history.csv", mime="text/csv")
             else:
                 st.caption("Історія порожня.")
+
+# ==========================================
+# 📄 ВКЛАДКА: ДИСПЕТЧЕРСЬКА ДОКУМЕНТАЦІЯ (DOCUMENT MANAGEMENT)
+# ==========================================
+if "documents" in tab_map:
+    with tab_map["documents"]:
+        st.title("📄 Диспетчерська документація")
+        st.caption(
+            "Електронний архів нарядів-допусків з погодженням та цифровим підписом (вимога "
+            "Держпраці), а також вбудована бібліотека нормативної документації (ПУЕ / ПТЕ / ПТБ) "
+            "для швидкого пошуку диспетчером під час прийняття рішень."
+        )
+
+        can_issue_permits = user_role in ("dispatcher", "admin")
+        is_brigade_doc = user_role == "brigade"
+
+        doc_tab1, doc_tab2 = st.tabs([
+            "📋 Архів нарядів-допусків", "📚 Бібліотека нормативної документації",
+        ])
+
+        # ─────────────────────────────────────────────────────
+        # ПІДВКЛАДКА 1: Архів нарядів-допусків
+        # ─────────────────────────────────────────────────────
+        with doc_tab1:
+            st.markdown("### 📋 Електронний архів нарядів-допусків")
+            st.caption(
+                "Життєвий цикл наряду: Чернетка → Погоджено диспетчером → Видано бригаді → "
+                "У виконанні → Закрито. Кожен перехід супроводжується електронним підписом "
+                "відповідальної особи та фіксується в оперативному журналі."
+            )
+
+            all_permits = st.session_state.permits
+            visible_permits = all_permits
+            if is_brigade_doc:
+                visible_permits = [p for p in all_permits if p["Бригада"] == current_user["subdivision"]]
+
+            active_permits = [p for p in visible_permits if p["Статус"] not in ("Закрито", "Скасовано")]
+            closed_permits = [p for p in visible_permits if p["Статус"] == "Закрито"]
+            overdue_permits = [
+                p for p in active_permits
+                if datetime.datetime.strptime(p["Термін дії до"], "%d.%m.%Y %H:%M") < datetime.datetime.now()
+            ]
+
+            pk1, pk2, pk3, pk4 = st.columns(4)
+            pk1.metric("📄 Всього нарядів в архіві", len(visible_permits))
+            pk2.metric("🟡 Активних (не закрито)", len(active_permits))
+            pk3.metric("✅ Закрито", len(closed_permits))
+            pk4.metric("🚨 Прострочено термін дії", len(overdue_permits), delta_color="inverse")
+
+            if overdue_permits:
+                st.error(
+                    "🚨 Прострочено термін дії наряду-допуску на об'єктах: "
+                    + ", ".join(sorted(set(p["Об'єкт"] for p in overdue_permits)))
+                    + ". Наряд необхідно негайно продовжити або закрити."
+                )
+
+            st.markdown("---")
+
+            # ── Форма створення нового наряду-допуску (диспетчер/адмін) ──
+            if can_issue_permits:
+                with st.expander("➕ Оформити новий наряд-допуск", expanded=False):
+                    with st.form("new_permit_form", clear_on_submit=True):
+                        pf1, pf2, pf3 = st.columns(3)
+                        permit_object = pf1.selectbox("Об'єкт мережі:", [o["name"] for o in st.session_state.objects], key="permit_object")
+                        permit_worktype = pf2.selectbox("Вид робіт:", PERMIT_WORK_TYPES, key="permit_worktype")
+                        permit_brigade = pf3.selectbox("Бригада-виконавець:", BRIGADE_NAMES, key="permit_brigade")
+
+                        pf4, pf5 = st.columns(2)
+                        roster_for_brigade = [e for e in EMPLOYEE_ROSTER if e["brigade"] == permit_brigade]
+                        leader_options = [e["name"] for e in roster_for_brigade] or [""]
+                        permit_leader = pf4.selectbox("Відповідальний керівник робіт:", leader_options, key="permit_leader")
+                        permit_admitter = pf5.text_input("Допускач (видає наряд):", value=current_user["display_name"], key="permit_admitter")
+
+                        permit_crew = st.multiselect(
+                            "Склад бригади:", [e["name"] for e in roster_for_brigade],
+                            default=[e["name"] for e in roster_for_brigade], key="permit_crew"
+                        )
+                        permit_task = st.text_area("Зміст завдання:", height=80,
+                                                    placeholder="напр. Планове ТО силового трансформатора, заміна ізоляторів...")
+                        permit_safety_measures = st.text_area(
+                            "Заходи безпеки перед початком робіт:", height=80,
+                            value="Заземлення встановлено, знято напругу, вивішено плакати безпеки, огороджено робочу зону.",
+                        )
+                        permit_special = st.text_input("Особливі умови (необов'язково):", value="—")
+
+                        pf6, pf7 = st.columns(2)
+                        permit_validity_days = pf6.number_input("Термін дії наряду, днів:", min_value=1, max_value=15, value=1, key="permit_validity")
+                        permit_signed_by_admitter = pf7.checkbox("✅ Допускач підписує наряд (ЕЦП)", value=True)
+
+                        permit_submitted = st.form_submit_button("📄 Оформити наряд-допуск (Чернетка)", type="primary", use_container_width=True)
+
+                        if permit_submitted:
+                            if not permit_task.strip():
+                                st.error("❌ Вкажіть зміст завдання.")
+                            elif not permit_crew:
+                                st.error("❌ Вкажіть склад бригади.")
+                            elif not permit_signed_by_admitter:
+                                st.error("❌ Наряд не може бути оформлений без підпису допускача.")
+                            else:
+                                st.session_state.permit_counter += 1
+                                now_dt = datetime.datetime.now()
+                                new_permit = {
+                                    "id": f"PERMIT-{now_dt.year}{st.session_state.permit_counter:04d}",
+                                    "Об'єкт": permit_object,
+                                    "Вид робіт": permit_worktype,
+                                    "Зміст завдання": permit_task.strip(),
+                                    "Заходи безпеки": permit_safety_measures.strip(),
+                                    "Особливі умови": permit_special.strip() or "—",
+                                    "Відповідальний керівник робіт": permit_leader,
+                                    "Допускач": permit_admitter.strip() or current_user["display_name"],
+                                    "Бригада": permit_brigade,
+                                    "Склад бригади": ", ".join(permit_crew),
+                                    "Дата видачі": now_dt.strftime("%d.%m.%Y %H:%M"),
+                                    "Термін дії до": (now_dt + datetime.timedelta(days=int(permit_validity_days))).strftime("%d.%m.%Y %H:%M"),
+                                    "Статус": "Погоджено диспетчером",
+                                    "Підпис допускача": True,
+                                    "Підпис керівника робіт": False,
+                                    "Підпис бригадира (отримання)": False,
+                                    "Дата закриття": None,
+                                    "Звіт про виконання": "",
+                                    "Створив": current_user["display_name"],
+                                    "_created_dt": now_dt,
+                                }
+                                st.session_state.permits.insert(0, new_permit)
+                                st.session_state.log_data.insert(0, {
+                                    "Час": now_dt.strftime("%d.%m %H:%M"), "Тип": "Інспекція",
+                                    "Об'єкт": permit_object,
+                                    "Опис": f"[{current_user['display_name']}] 📄 Оформлено наряд-допуск {new_permit['id']} ({permit_worktype}) для {permit_brigade}. Погоджено, підпис допускача проставлено.",
+                                    "Критичність": "Висока",
+                                })
+                                st.success(f"✅ Наряд-допуск {new_permit['id']} оформлено та погоджено!")
+                                st.rerun()
+
+            st.markdown("#### 📂 Реєстр нарядів-допусків")
+            flt_pm1, flt_pm2, flt_pm3 = st.columns(3)
+            f_permit_status = flt_pm1.selectbox("Статус:", ["Усі"] + PERMIT_STATUS_FLOW, key="f_permit_status")
+            f_permit_brigade = flt_pm2.selectbox("Бригада:", ["Усі"] + BRIGADE_NAMES, key="f_permit_brigade")
+            f_permit_search = flt_pm3.text_input("🔍 Пошук за об'єктом:", key="f_permit_search")
+
+            permits_filtered = visible_permits
+            if f_permit_status != "Усі":
+                permits_filtered = [p for p in permits_filtered if p["Статус"] == f_permit_status]
+            if f_permit_brigade != "Усі":
+                permits_filtered = [p for p in permits_filtered if p["Бригада"] == f_permit_brigade]
+            if f_permit_search.strip():
+                q = f_permit_search.strip().lower()
+                permits_filtered = [p for p in permits_filtered if q in p["Об'єкт"].lower()]
+
+            st.caption(f"Знайдено: {len(permits_filtered)} із {len(visible_permits)} нарядів")
+
+            for permit in permits_filtered:
+                status_color = get_permit_status_color(permit["Статус"])
+                is_overdue = (
+                    permit["Статус"] not in ("Закрито", "Скасовано")
+                    and datetime.datetime.strptime(permit["Термін дії до"], "%d.%m.%Y %H:%M") < datetime.datetime.now()
+                )
+                with st.container(border=True):
+                    hp1, hp2, hp3 = st.columns([2.2, 1.2, 1])
+                    _permit_obj_name = permit["Об'єкт"]
+                    hp1.markdown(f"**{permit['id']} — {_permit_obj_name}** · {permit['Вид робіт']}")
+                    hp2.markdown(f"<span style='color:{status_color};font-weight:700'>{permit['Статус']}</span>", unsafe_allow_html=True)
+                    if is_overdue:
+                        hp3.markdown("<span style='color:#ef4444;font-weight:700'>🚨 Прострочено</span>", unsafe_allow_html=True)
+                    else:
+                        hp3.caption(f"До: {permit['Термін дії до']}")
+
+                    st.caption(
+                        f"🪖 Бригада: {permit['Бригада']} · 👷 Керівник робіт: {permit['Відповідальний керівник робіт']} · "
+                        f"✍️ Допускач: {permit['Допускач']} · 🕐 Видано: {permit['Дата видачі']}"
+                    )
+                    st.write(f"**Зміст завдання:** {permit['Зміст завдання']}")
+                    st.caption(f"🦺 Заходи безпеки: {permit['Заходи безпеки']}")
+                    if permit["Особливі умови"] and permit["Особливі умови"] != "—":
+                        st.caption(f"⚠️ Особливі умови: {permit['Особливі умови']}")
+                    st.caption(f"👥 Склад бригади: {permit['Склад бригади']}")
+
+                    # ── Індикатори підписів ──
+                    sig1, sig2, sig3 = st.columns(3)
+                    sig1.markdown(f"{'✅' if permit['Підпис допускача'] else '⬜'} Підпис допускача")
+                    sig2.markdown(f"{'✅' if permit['Підпис керівника робіт'] else '⬜'} Підпис керівника робіт")
+                    sig3.markdown(f"{'✅' if permit['Підпис бригадира (отримання)'] else '⬜'} Підпис бригадира (отримання)")
+
+                    if permit["Статус"] == "Закрито":
+                        st.success(f"✅ Закрито {permit['Дата закриття']}. Звіт: {permit['Звіт про виконання']}")
+
+                    # ── Дії за станом workflow ──
+                    if can_issue_permits and permit["Статус"] == "Погоджено диспетчером":
+                        ac1, ac2 = st.columns(2)
+                        if ac1.button("📲 Видати бригаді (підпис керівника робіт)", key=f"issue_{permit['id']}", use_container_width=True):
+                            permit["Статус"] = "Видано бригаді"
+                            permit["Підпис керівника робіт"] = True
+                            now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
+                            st.session_state.log_data.insert(0, {
+                                "Час": now_str, "Тип": "Інспекція", "Об'єкт": permit["Об'єкт"],
+                                "Опис": f"[{current_user['display_name']}] 📄 Наряд-допуск {permit['id']} видано бригаді {permit['Бригада']}. Підпис керівника робіт проставлено.",
+                                "Критичність": "Висока",
+                            })
+                            st.toast(f"✅ Наряд {permit['id']} видано бригаді.")
+                            st.rerun()
+                        if ac2.button("⛔ Скасувати наряд", key=f"cancel_{permit['id']}", use_container_width=True):
+                            permit["Статус"] = "Скасовано"
+                            st.rerun()
+
+                    elif permit["Статус"] == "Видано бригаді":
+                        if is_brigade_doc and permit["Бригада"] == current_user["subdivision"]:
+                            if st.button("✍️ Прийняти наряд (підпис бригадира про отримання)", key=f"accept_{permit['id']}", use_container_width=True):
+                                permit["Статус"] = "У виконанні"
+                                permit["Підпис бригадира (отримання)"] = True
+                                now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
+                                st.session_state.log_data.insert(0, {
+                                    "Час": now_str, "Тип": "Інспекція", "Об'єкт": permit["Об'єкт"],
+                                    "Опис": f"[{current_user['display_name']}] 📄 Бригада {permit['Бригада']} прийняла наряд-допуск {permit['id']} до виконання (допуск на робоче місце).",
+                                    "Критичність": "Висока",
+                                })
+                                st.toast(f"✅ Наряд {permit['id']} прийнято бригадою.")
+                                st.rerun()
+                        elif can_issue_permits:
+                            st.caption("⏳ Очікує підтвердження допуску бригадиром на робочому місці.")
+
+                    elif permit["Статус"] == "У виконанні":
+                        if (is_brigade_doc and permit["Бригада"] == current_user["subdivision"]) or can_issue_permits:
+                            with st.form(f"close_permit_form_{permit['id']}"):
+                                close_report = st.text_area(
+                                    "Звіт про виконання робіт:", height=70,
+                                    placeholder="Роботи виконано в повному обсязі, зауважень немає...",
+                                    key=f"close_report_{permit['id']}"
+                                )
+                                close_confirm = st.checkbox(
+                                    "✅ Підтверджую завершення робіт, зняття огороджень і плакатів, виведення бригади (закриття наряду)",
+                                    key=f"close_confirm_{permit['id']}"
+                                )
+                                close_submitted = st.form_submit_button("🔒 Закрити наряд-допуск", type="primary", use_container_width=True)
+                                if close_submitted:
+                                    if not close_confirm:
+                                        st.error("❌ Підтвердіть завершення робіт перед закриттям наряду.")
+                                    elif not close_report.strip():
+                                        st.error("❌ Введіть звіт про виконані роботи.")
+                                    else:
+                                        now_dt2 = datetime.datetime.now()
+                                        permit["Статус"] = "Закрито"
+                                        permit["Дата закриття"] = now_dt2.strftime("%d.%m.%Y %H:%M")
+                                        permit["Звіт про виконання"] = close_report.strip()
+                                        st.session_state.log_data.insert(0, {
+                                            "Час": now_dt2.strftime("%d.%m %H:%M"), "Тип": "Планове ТО" if "Планове" in permit["Вид робіт"] else "Ремонт",
+                                            "Об'єкт": permit["Об'єкт"],
+                                            "Опис": f"[{current_user['display_name']}] 🔒 Наряд-допуск {permit['id']} закрито. Звіт: {close_report.strip()}",
+                                            "Критичність": "Низька",
+                                        })
+                                        st.success(f"✅ Наряд-допуск {permit['id']} закрито та заархівовано.")
+                                        st.rerun()
+
+                    # ── Друк / архівний PDF-подібний текстовий бланк ──
+                    _permit_obj_name = permit["Об'єкт"]
+                    permit_doc_text = (
+                        f"НАРЯД-ДОПУСК № {permit['id']}\n"
+                        f"на проведення робіт в електроустановках (форма відповідно до вимог Держпраці)\n"
+                        f"{'='*60}\n"
+                        f"Об'єкт: {_permit_obj_name}\n"
+                        f"Вид робіт: {permit['Вид робіт']}\n"
+                        f"Зміст завдання: {permit['Зміст завдання']}\n"
+                        f"Заходи безпеки: {permit['Заходи безпеки']}\n"
+                        f"Особливі умови: {permit['Особливі умови']}\n"
+                        f"{'-'*60}\n"
+                        f"Відповідальний керівник робіт: {permit['Відповідальний керівник робіт']}\n"
+                        f"Допускач (видав наряд): {permit['Допускач']}\n"
+                        f"Бригада-виконавець: {permit['Бригада']}\n"
+                        f"Склад бригади: {permit['Склад бригади']}\n"
+                        f"{'-'*60}\n"
+                        f"Дата видачі: {permit['Дата видачі']}\n"
+                        f"Термін дії до: {permit['Термін дії до']}\n"
+                        f"Статус: {permit['Статус']}\n"
+                        f"Підпис допускача: {'ПІДПИСАНО' if permit['Підпис допускача'] else 'не підписано'}\n"
+                        f"Підпис керівника робіт: {'ПІДПИСАНО' if permit['Підпис керівника робіт'] else 'не підписано'}\n"
+                        f"Підпис бригадира (отримання): {'ПІДПИСАНО' if permit['Підпис бригадира (отримання)'] else 'не підписано'}\n"
+                        + (f"Дата закриття: {permit['Дата закриття']}\nЗвіт про виконання: {permit['Звіт про виконання']}\n" if permit["Дата закриття"] else "")
+                        + f"{'='*60}\n"
+                        f"Створив у системі: {permit['Створив']}\n"
+                        f"Згенеровано електронним архівом ГІС ДС АТ «Вінницяобленерго».\n"
+                    )
+                    st.download_button(
+                        "📄 Завантажити бланк наряду (.txt)", data=permit_doc_text,
+                        file_name=f"{permit['id']}.txt", mime="text/plain",
+                        key=f"dl_permit_{permit['id']}", use_container_width=True
+                    )
+
+            # ── Експорт повного реєстру ──
+            if can_issue_permits and visible_permits:
+                st.markdown("---")
+                permits_export_df = pd.DataFrame([{k: v for k, v in p.items() if k != "_created_dt"} for p in visible_permits])
+                st.download_button(
+                    "📥 Завантажити повний реєстр нарядів-допусків (.csv)",
+                    data=permits_export_df.to_csv(index=False).encode("utf-8"),
+                    file_name="permits_archive.csv", mime="text/csv"
+                )
+
+            with st.expander("ℹ️ Про життєвий цикл наряду-допуску"):
+                st.markdown("""
+                * **Чернетка → Погоджено диспетчером:** наряд оформлюється диспетчером/адміністратором
+                  та одразу підписується допускачем (ЕЦП).
+                * **Погоджено → Видано бригаді:** відповідальний керівник робіт підписує наряд, підтверджуючи
+                  готовність технічних заходів (заземлення, огородження, плакати безпеки).
+                * **Видано бригаді → У виконанні:** бригадир на місці підписує допуск до роботи —
+                  фіксується фактичний початок робіт під наглядом.
+                * **У виконанні → Закрито:** після завершення робіт складається звіт, знімаються огородження,
+                  і наряд закривається — з цього моменту він переходить в архів (незмінний запис).
+                * Прострочення терміну дії наряду (за замовчуванням — до 15 днів, типово 1 добу) підсвічується
+                  системою червоним кольором і потребує негайного продовження або закриття.
+                """)
+
+        # ─────────────────────────────────────────────────────
+        # ПІДВКЛАДКА 2: Бібліотека нормативної документації
+        # ─────────────────────────────────────────────────────
+        with doc_tab2:
+            st.markdown("### 📚 Бібліотека нормативної документації (ПУЕ / ПТЕ / ПТБ)")
+            st.caption(
+                "Вбудована довідкова база ключових положень правил улаштування електроустановок (ПУЕ), "
+                "правил технічної експлуатації (ПТЕ) та правил технічної безпеки (ПТБ) — для швидкого "
+                "пошуку диспетчером під час прийняття оперативних рішень."
+            )
+
+            lib_col1, lib_col2, lib_col3 = st.columns([1, 1, 2])
+            f_lib_code = lib_col1.selectbox("Документ:", ["Усі"] + NORMATIVE_CODES, key="f_lib_code")
+            all_tags = sorted(set(tag for d in NORMATIVE_LIBRARY for tag in d["теги"]))
+            f_lib_tag = lib_col2.selectbox("Тема:", ["Усі"] + all_tags, key="f_lib_tag")
+            f_lib_search = lib_col3.text_input("🔍 Пошук за ключовим словом (розділ, назва, текст):", key="f_lib_search")
+
+            lib_filtered = NORMATIVE_LIBRARY
+            if f_lib_code != "Усі":
+                lib_filtered = [d for d in lib_filtered if d["код"] == f_lib_code]
+            if f_lib_tag != "Усі":
+                lib_filtered = [d for d in lib_filtered if f_lib_tag in d["теги"]]
+            if f_lib_search.strip():
+                q = f_lib_search.strip().lower()
+                lib_filtered = [
+                    d for d in lib_filtered
+                    if q in d["назва"].lower() or q in d["текст"].lower() or q in d["розділ"].lower()
+                    or any(q in t.lower() for t in d["теги"])
+                ]
+
+            st.caption(f"Знайдено: {len(lib_filtered)} із {len(NORMATIVE_LIBRARY)} положень")
+
+            doc_badge_colors = {"ПУЕ": "#38bdf8", "ПТЕ": "#a855f7", "ПТБ": "#ef4444"}
+            if lib_filtered:
+                for item in lib_filtered:
+                    badge_color = doc_badge_colors.get(item["код"], "#64748b")
+                    with st.container(border=True):
+                        st.markdown(
+                            f"<span style='background:{badge_color};color:#fff;border-radius:4px;"
+                            f"padding:2px 9px;font-size:0.78rem;font-weight:700;'>{item['код']} · п. {item['розділ']}</span>"
+                            f"&nbsp;&nbsp;**{item['назва']}**",
+                            unsafe_allow_html=True
+                        )
+                        st.write(item["текст"])
+                        st.caption("🏷️ " + ", ".join(item["теги"]))
+            else:
+                st.info("За вказаними умовами пошуку положень не знайдено. Спробуйте змінити фільтри.")
+
+            st.markdown("---")
+            lib_export_df = pd.DataFrame([{
+                "Документ": d["код"], "Розділ": d["розділ"], "Назва": d["назва"],
+                "Текст": d["текст"], "Теги": ", ".join(d["теги"]),
+            } for d in NORMATIVE_LIBRARY])
+            st.download_button(
+                "📥 Завантажити повну бібліотеку НД (.csv)",
+                data=lib_export_df.to_csv(index=False).encode("utf-8"),
+                file_name="normative_library.csv", mime="text/csv"
+            )
+
+            with st.expander("ℹ️ Про бібліотеку нормативної документації"):
+                st.markdown("""
+                * Бібліотека містить витяги ключових положень **ПУЕ** (Правила улаштування електроустановок),
+                  **ПТЕ** (Правила технічної експлуатації електроустановок споживачів) та **ПТБ**
+                  (Правила технічної безпеки під час експлуатації електроустановок).
+                * Використовуйте пошук за документом, темою (тегом) або довільним ключовим словом —
+                  система шукає одночасно по розділу, назві, тексту та тегах положення.
+                * Це довідковий інструмент для швидкої орієнтації диспетчера; для остаточного застосування
+                  норм слід звертатися до чинної редакції офіційних текстів правил.
+                """)
 
 # ==========================================
 # ⚡ ВКЛАДКА: ВЗАЄМОДІЯ З УКРЕНЕРГО (СИСТЕМНИЙ ОПЕРАТОР)
