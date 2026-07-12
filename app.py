@@ -142,8 +142,8 @@ if not st.session_state.authenticated:
             |---|---|---|
             | `dispatcher` | `disp2026` | 👷 Диспетчер |
             | `admin` | `admin2026` | 🔑 Адміністратор |
-            | `brigade1` | `brigade111` | 🪖 Монтер (Бригада №1) |
-            | `brigade2` | `brigade222` | 🪖 Монтер (Бригада №2) |
+            | `brigade1` | `brigade1` | 🪖 Монтер (Бригада №1) |
+            | `brigade2` | `brigade2` | 🪖 Монтер (Бригада №2) |
             | `crm_manager` | `crm2026` | 💰 Менеджер CRM |
             """)
     st.stop()
