@@ -954,7 +954,6 @@ TAB_DEFINITIONS = {
         ("🧠 Інтелектуальна діагностика", "diagnostics"),
         ("⚖️ Енергобаланс", "energy_balance"),
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
-        ("🧠 AI-асистент", "ai_assistant"),
     ],
     "admin_tabs": [
         ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"),
@@ -973,7 +972,6 @@ TAB_DEFINITIONS = {
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
         ("💰 CRM та Білінг", "crm"),
         ("💾 Data Центр", "data"), ("👥 Управління доступом", "users"),
-        ("🧠 AI-асистент", "ai_assistant"),
     ],
     "crm_tabs": [
         ("🏠 Головна", "home"),
@@ -4295,64 +4293,6 @@ if "energy_balance" in tab_map:
             """)
 
 # ==========================================
-# 🧠 ВКЛАДКА: AI-АСИСТЕНТ
-# ==========================================
-if "ai_assistant" in tab_map:
-    with tab_map["ai_assistant"]:
-        st.title("🧠 AI-асистент диспетчера")
-        st.markdown("""
-        Віртуальний помічник для аналізу оперативної ситуації, консультацій за нормативною базою 
-        та швидкого підсумовування подій.
-        """)
-
-        if "ai_messages" not in st.session_state:
-            st.session_state.ai_messages = [
-                {"role": "assistant", "content": "Вітаю! Я готовий допомогти. Можу проаналізувати журнал подій, надати витяг з ПТБ або допомогти сформувати звіт."}
-            ]
-
-        # Відображення чату
-        for msg in st.session_state.ai_messages:
-            with st.chat_message(msg["role"]):
-                st.write(msg["content"])
-
-        # Введення користувача
-        if prompt := st.chat_input("Запитайте щось про стан мережі або регламенти..."):
-            st.session_state.ai_messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.write(prompt)
-
-            with st.chat_message("assistant"):
-                with st.spinner("Аналізую дані..."):
-                    # --- ЛОГІКА АНАЛІЗУ (СИМУЛЯЦІЯ) ---
-                    response = ""
-                    prompt_lower = prompt.lower()
-                    
-                    if "аварі" in prompt_lower:
-                        active_incidents = [l for l in st.session_state.log_data if l["Тип"] == "Аварія"]
-                        response = f"Наразі в системі зафіксовано {len(active_incidents)} активних аварійних подій. "
-                        if active_incidents:
-                            response += f"Остання: {active_incidents[0]['Об'єкт']} - {active_incidents[0]['Опис']}."
-                    
-                    elif "правила" in prompt_lower or "пуе" in prompt_lower or "птб" in prompt_lower:
-                        # Пошук по вашій NORMATIVE_LIBRARY
-                        matches = [d for d in NORMATIVE_LIBRARY if any(tag in prompt_lower for tag in d["теги"])]
-                        if matches:
-                            response = f"Згідно з регламентом ({matches[0]['код']} п.{matches[0]['розділ']}): {matches[0]['текст']}"
-                        else:
-                            response = "Не знайшов точного регламенту за вашим запитом. Перевірте теги в розділі документації."
-                            
-                    elif "звіт" in prompt_lower:
-                        response = f"Система готова. Сформовано стислий звіт: в мережі працює {len(st.session_state.permits)} бригад. "
-                        response += f"Критичних відхилень напруги не виявлено (згідно з останнім діагностичним скануванням)."
-                    
-                    else:
-                        response = "Я аналізую поточну ситуацію в мережі Вінницяобленерго. Спробуйте запитати: 'Які зараз аварії?', 'Що кажуть ПТБ про заземлення?' або 'Сформуй звіт'."
-                    
-                    st.write(response)
-            
-            st.session_state.ai_messages.append({"role": "assistant", "content": response})
-
-# ==========================================
 # ВКЛАДКА: ЖУРНАЛ ПОДІЙ
 # ==========================================
 if "log" in tab_map:
@@ -4362,30 +4302,30 @@ if "log" in tab_map:
         Централізований реєстр всіх комутаційних операцій, аварійних відключень та планових робіт.
         Використовуйте фільтри нижче для швидкого пошуку конкретних інцидентів.
         """)
-        
+
         # Створення DataFrame
         df = pd.DataFrame(st.session_state.log_data)
-        
+
         # --- Блок фільтрів ---
         with st.container(border=True):
             st.markdown("#### ⚙️ Панель фільтрації")
             f1, f2, f3, f4 = st.columns([2, 1.5, 1.5, 1])
-            
+
             search_query = f1.text_input("🔍 Пошук за об'єктом:", placeholder="Наприклад: ТП-245...")
             type_filter = f2.selectbox("Тип події:", ["Усі типи", "Аварія", "Планове ТО", "Ремонт", "Інспекція"])
             crit_filter = f3.selectbox("Критичність:", ["Усі рівні", "Критична", "Висока", "Середня", "Низька"])
-            
+
             # Логіка фільтрації
             if type_filter != "Усі типи": df = df[df["Тип"] == type_filter]
             if crit_filter != "Усі рівні": df = df[df["Критичність"] == crit_filter]
             if search_query: df = df[df["Об'єкт"].str.contains(search_query, case=False)]
-        
+
         # --- Статистика по журналу ---
         c_stat1, c_stat2, c_stat3 = st.columns(3)
         c_stat1.metric("Всього записів", len(df))
         c_stat2.metric("Активних аварій", len(df[df["Тип"] == "Аварія"]))
         c_stat3.metric("Рівень вибірки", f"{int((len(df) / len(st.session_state.log_data)) * 100)}%")
-        
+
         st.markdown("<br>", unsafe_allow_html=True)
 
         # --- Таблиця журналу з умовним форматуванням ---
@@ -4395,7 +4335,7 @@ if "log" in tab_map:
 
         st.dataframe(
             df.style.map(color_criticality, subset=["Критичність"]),
-            use_container_width=True, 
+            use_container_width=True,
             hide_index=True,
             column_config={
                 "Час": st.column_config.TextColumn("Час фіксації"),
@@ -4403,12 +4343,12 @@ if "log" in tab_map:
                 "Опис": st.column_config.TextColumn("Деталі події", width="large")
             }
         )
-        
+
         # --- Блок дій ---
         col_act1, col_act2 = st.columns([1, 4])
         if col_act1.button("🔄 Оновити дані", use_container_width=True):
             st.rerun()
-            
+
         with st.expander("ℹ️ Інструкція з роботи з журналом"):
             st.markdown("""
             * **Оперативність:** Журнал оновлюється в реальному часі.
@@ -4445,86 +4385,86 @@ if "schedule" in tab_map:
 if "data" in tab_map:
     with tab_map["data"]:
         st.title("💾 Data-Центр: Архітектура та Синхронізація")
-        
+
         # Вступний текст
         st.markdown("""
-        Вітаємо в панелі управління даними. Тут здійснюється контроль за цілісністю бази даних, 
-        оперативне вивантаження звітів для аналітичних відділів та імпорт оновлених конфігурацій 
+        Вітаємо в панелі управління даними. Тут здійснюється контроль за цілісністю бази даних,
+        оперативне вивантаження звітів для аналітичних відділів та імпорт оновлених конфігурацій
         мереж. **Всі дії в цьому розділі протоколюються системою безпеки.**
         """)
-        
+
         # Рядок з метриками Data-центру
         d1, d2, d3 = st.columns(3)
         d1.metric("Журнал подій", f"{len(st.session_state.log_data)} записів", "Актуально")
         d2.metric("Об'єктів мережі", f"{len(st.session_state.objects)}", "Синхронізовано")
         d3.metric("Резервних копій", "12", "Автоматично")
-        
+
         st.divider()
-        
+
         col_exp, col_imp = st.columns([1, 1.2], gap="large")
-        
+
         with col_exp:
             st.subheader("📤 Експорт даних")
             st.markdown("""
-            Використовуйте експорт для створення копій звітів. 
+            Використовуйте експорт для створення копій звітів.
             Система автоматично формує файли згідно з регламентом АТ «Вінницяобленерго».
             """)
-            
+
             curr_df = pd.DataFrame(st.session_state.log_data)
-            
+
             # Експорт кнопок
             c_exp1, c_exp2 = st.columns(2)
             csv_data = curr_df.to_csv(index=False).encode('utf-8')
-            c_exp1.download_button("📥 CSV-лог", data=csv_data, file_name="voe_log_export.csv", 
+            c_exp1.download_button("📥 CSV-лог", data=csv_data, file_name="voe_log_export.csv",
                                    mime="text/csv", use_container_width=True)
-            
+
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 curr_df.to_excel(writer, index=False, sheet_name='Журнал Подій')
             c_exp2.download_button("📊 Excel-звіт", data=buffer.getvalue(), file_name="voe_report.xlsx",
-                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                    use_container_width=True)
-            
+
             json_data = json.dumps(st.session_state.log_data, indent=4, ensure_ascii=False)
-            st.download_button("📜 JSON-конфіг (Full Backup)", data=json_data, file_name="system_config.json", 
+            st.download_button("📜 JSON-конфіг (Full Backup)", data=json_data, file_name="system_config.json",
                                mime="application/json", use_container_width=True)
 
         with col_imp:
             st.subheader("📥 Імпорт та Синхронізація")
             st.warning("Увага: Імпорт конфігурацій змінює поточний стан ГІС-системи.")
             st.markdown("""
-            Завантажте файл оновлення мережі або реєстр нових об'єктів. 
+            Завантажте файл оновлення мережі або реєстр нових об'єктів.
             **Вимоги до файлу:**
             * Формат: .csv (UTF-8), .xlsx або .json
             * Наявність полів: `name`, `latitude`, `longitude`, `type`
             * Необхідна наявність ЕЦП для підтвердження транзакції.
             """)
-            
+
             uploaded_file = st.file_uploader("Оберіть файл для завантаження:", type=["csv", "xlsx", "json"])
-            
+
             if uploaded_file is not None:
                 st.info(f"📁 Файл: **{uploaded_file.name}** ({uploaded_file.size} bytes)")
                 with st.spinner('Проводиться валідація даних...'):
-                    time.sleep(1.5) 
+                    time.sleep(1.5)
                     st.success("✅ Структура файлу відповідає стандартам VOE.")
-                    
+
                     if st.button("🚀 Застосувати зміни в БД", type="primary", use_container_width=True):
                         st.balloons()
                         st.success("Базу даних успішно оновлено. Система перезавантажується.")
 
         st.divider()
-        
+
         # Додаткова технічна інформація
         with st.expander("ℹ️ Технічні примітки для Адміністратора"):
             st.markdown("""
-            * **Синхронізація:** Дані синхронізуються з центральним сервером кожні 15 хвилин. 
+            * **Синхронізація:** Дані синхронізуються з центральним сервером кожні 15 хвилин.
             * **Логи:** Користувач `admin` має доступ до розширеного аудиту дій.
-            * **Безпека:** Якщо ви помітили невідповідність у даних (наприклад, зсув координат), 
+            * **Безпека:** Якщо ви помітили невідповідність у даних (наприклад, зсув координат),
               негайно запустіть скрипт `verify_integrity()` через консоль розробника.
-            * **Підтримка:** При виникненні помилок під час імпорту звертайтеся до внутрішнього 
+            * **Підтримка:** При виникненні помилок під час імпорту звертайтеся до внутрішнього
               порталу IT-департаменту (Ticket ID: #VOE-9902).
             """)
-            
+
         st.subheader("⚙️ Службові налаштування")
         col_s1, col_s2 = st.columns(2)
         col_s1.toggle("Автоматичне резервне копіювання", value=True)
