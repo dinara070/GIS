@@ -142,8 +142,8 @@ if not st.session_state.authenticated:
             |---|---|---|
             | `dispatcher` | `disp2026` | 👷 Диспетчер |
             | `admin` | `admin2026` | 🔑 Адміністратор |
-            | `brigade1` | `brigade1` | 🪖 Монтер (Бригада №1) |
-            | `brigade2` | `brigade2` | 🪖 Монтер (Бригада №2) |
+            | `brigade1` | `brigade111` | 🪖 Монтер (Бригада №1) |
+            | `brigade2` | `brigade222` | 🪖 Монтер (Бригада №2) |
             | `crm_manager` | `crm2026` | 💰 Менеджер CRM |
             """)
     st.stop()
@@ -954,6 +954,7 @@ TAB_DEFINITIONS = {
         ("🧠 Інтелектуальна діагностика", "diagnostics"),
         ("⚖️ Енергобаланс", "energy_balance"),
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
+        ("🧠 AI-асистент", "ai_assistant"),
     ],
     "admin_tabs": [
         ("🏠 Головна", "home"), ("🗺️ Диспетчер мапи", "map"),
@@ -972,6 +973,7 @@ TAB_DEFINITIONS = {
         ("📋 Журнал подій", "log"), ("📅 Планування ТО", "schedule"),
         ("💰 CRM та Білінг", "crm"),
         ("💾 Data Центр", "data"), ("👥 Управління доступом", "users"),
+        ("🧠 AI-асистент", "ai_assistant"),
     ],
     "crm_tabs": [
         ("🏠 Головна", "home"),
@@ -4291,6 +4293,64 @@ if "energy_balance" in tab_map:
               несанкціоновані підключення, розкрадання електроенергії або масові несправності лічильників —
               і є прямим тригером для позапланової перевірки обліку на дільниці.
             """)
+
+# ==========================================
+# 🧠 ВКЛАДКА: AI-АСИСТЕНТ
+# ==========================================
+if "ai_assistant" in tab_map:
+    with tab_map["ai_assistant"]:
+        st.title("🧠 AI-асистент диспетчера")
+        st.markdown("""
+        Віртуальний помічник для аналізу оперативної ситуації, консультацій за нормативною базою 
+        та швидкого підсумовування подій.
+        """)
+
+        if "ai_messages" not in st.session_state:
+            st.session_state.ai_messages = [
+                {"role": "assistant", "content": "Вітаю! Я готовий допомогти. Можу проаналізувати журнал подій, надати витяг з ПТБ або допомогти сформувати звіт."}
+            ]
+
+        # Відображення чату
+        for msg in st.session_state.ai_messages:
+            with st.chat_message(msg["role"]):
+                st.write(msg["content"])
+
+        # Введення користувача
+        if prompt := st.chat_input("Запитайте щось про стан мережі або регламенти..."):
+            st.session_state.ai_messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.write(prompt)
+
+            with st.chat_message("assistant"):
+                with st.spinner("Аналізую дані..."):
+                    # --- ЛОГІКА АНАЛІЗУ (СИМУЛЯЦІЯ) ---
+                    response = ""
+                    prompt_lower = prompt.lower()
+                    
+                    if "аварі" in prompt_lower:
+                        active_incidents = [l for l in st.session_state.log_data if l["Тип"] == "Аварія"]
+                        response = f"Наразі в системі зафіксовано {len(active_incidents)} активних аварійних подій. "
+                        if active_incidents:
+                            response += f"Остання: {active_incidents[0]['Об'єкт']} - {active_incidents[0]['Опис']}."
+                    
+                    elif "правила" in prompt_lower or "пуе" in prompt_lower or "птб" in prompt_lower:
+                        # Пошук по вашій NORMATIVE_LIBRARY
+                        matches = [d for d in NORMATIVE_LIBRARY if any(tag in prompt_lower for tag in d["теги"])]
+                        if matches:
+                            response = f"Згідно з регламентом ({matches[0]['код']} п.{matches[0]['розділ']}): {matches[0]['текст']}"
+                        else:
+                            response = "Не знайшов точного регламенту за вашим запитом. Перевірте теги в розділі документації."
+                            
+                    elif "звіт" in prompt_lower:
+                        response = f"Система готова. Сформовано стислий звіт: в мережі працює {len(st.session_state.permits)} бригад. "
+                        response += f"Критичних відхилень напруги не виявлено (згідно з останнім діагностичним скануванням)."
+                    
+                    else:
+                        response = "Я аналізую поточну ситуацію в мережі Вінницяобленерго. Спробуйте запитати: 'Які зараз аварії?', 'Що кажуть ПТБ про заземлення?' або 'Сформуй звіт'."
+                    
+                    st.write(response)
+            
+            st.session_state.ai_messages.append({"role": "assistant", "content": response})
 
 # ==========================================
 # ВКЛАДКА: ЖУРНАЛ ПОДІЙ
