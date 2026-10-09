@@ -4,9 +4,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import json
 import io
+import os
+import hmac
 import datetime
 import random as _rnd
-import time
+import random
+from html import escape as esc
 
 try:
     import folium
@@ -41,8 +44,44 @@ st.markdown("""
 plt.style.use('dark_background')
 
 # ==========================================
+# ДОПОМІЖНІ ФУНКЦІЇ: БЕЗПЕКА, СУМІСНІСТЬ, ВИПАДКОВІСТЬ
+# ==========================================
+# Окремий генератор: глобальні _rnd.seed(...) нижче виконуються на кожному rerun і роблять _rnd детермінованим.
+_sys_rnd = random.SystemRandom()
+UA_MONTHS = ["січень", "лютий", "березень", "квітень", "травень", "червень",
+             "липень", "серпень", "вересень", "жовтень", "листопад", "грудень"]
+
+
+def _csv_safe_value(v):
+    """Нейтралізує значення, що починаються з = + - @ (виконуються як формули в Excel/CSV)."""
+    if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + v
+    return v
+
+
+def csv_safe(df):
+    out = df.copy()
+    for c in out.columns:
+        s = out[c]
+        if s.dtype == object or pd.api.types.is_string_dtype(s):
+            out[c] = s.map(_csv_safe_value)
+    return out
+
+
+def to_csv_bytes(df):
+    """CSV для завантаження: захист від формул + utf-8-sig, щоб Excel коректно показував кирилицю."""
+    return csv_safe(df).to_csv(index=False).encode("utf-8-sig")
+
+
+def style_map(styler, fn, subset):
+    """Styler.map (pandas >= 2.1) з відкатом на applymap для старіших версій."""
+    return styler.map(fn, subset=subset) if hasattr(styler, "map") else styler.applymap(fn, subset=subset)
+
+
+# ==========================================
 # СИСТЕМА АВТОРИЗАЦІЇ
 # ==========================================
+# Демо-акаунти. У продакшні задайте [users.<login>] у .streamlit/secrets.toml (password, role, display_name, subdivision).
 USERS_DB = {
     "dispatcher": {
         "password": "disp2026",
@@ -75,6 +114,20 @@ USERS_DB = {
         "subdivision": "Відділ комерційного обліку"
     },
 }
+DEMO_MODE = os.environ.get("VOE_DEMO", "1") == "1"  # VOE_DEMO=0 — сховати таблицю тестових акаунтів
+
+
+def _load_users():
+    try:
+        u = st.secrets.get("users")
+        if u:
+            return {k: dict(v) for k, v in u.items()}
+    except Exception:
+        pass
+    return USERS_DB
+
+
+ACTIVE_USERS = _load_users()
 
 ROLE_LABELS = {
     "dispatcher": "👷 Диспетчер",
@@ -91,18 +144,27 @@ if "login_error" not in st.session_state:
     st.session_state.login_error = ""
 
 def do_login(username, password):
-    user = USERS_DB.get(username.strip().lower())
-    if user and user["password"] == password:
+    uname = username.strip().lower()
+    user = ACTIVE_USERS.get(uname)
+    if user and hmac.compare_digest(str(user["password"]).encode("utf-8"), (password or "").encode("utf-8")):
         st.session_state.authenticated = True
         st.session_state.current_user = {
-            "login": username, "role": user["role"],
+            "login": uname, "role": user["role"],
             "display_name": user["display_name"], "subdivision": user["subdivision"]
         }
         st.session_state.login_error = ""
     else:
         st.session_state.login_error = "❌ Невірний логін або пароль. Спробуйте ще раз."
 
+_PERSONAL_STATE_KEYS = (
+    "lms_current_test", "uploaded_photos", "camera_shots", "voice_transcript", "geo_arrived",
+    "geo_lat", "geo_lon", "geo_time", "gis_pending_point", "diag_demo_requested", "task_closed",
+)
+
 def do_logout():
+    # Очищаємо персональні дані сеансу, щоб наступний користувач не бачив чужих тестів, фото та GPS.
+    for k in _PERSONAL_STATE_KEYS:
+        st.session_state.pop(k, None)
     st.session_state.authenticated = False
     st.session_state.current_user = None
     st.session_state.login_error = ""
@@ -136,16 +198,17 @@ if not st.session_state.authenticated:
             </p>
         </div>
         """, unsafe_allow_html=True)
-        with st.expander("ℹ️ Тестові облікові записи (для демо)", expanded=False):
-            st.markdown("""
-            | Логін | Пароль | Роль |
-            |---|---|---|
-            | `dispatcher` | `disp2026` | 👷 Диспетчер |
-            | `admin` | `admin2026` | 🔑 Адміністратор |
-            | `brigade1` | `brigade1` | 🪖 Монтер (Бригада №1) |
-            | `brigade2` | `brigade2` | 🪖 Монтер (Бригада №2) |
-            | `crm_manager` | `crm2026` | 💰 Менеджер CRM |
-            """)
+        if DEMO_MODE:
+            with st.expander("ℹ️ Тестові облікові записи (для демо)", expanded=False):
+                st.markdown("""
+                | Логін | Пароль | Роль |
+                |---|---|---|
+                | `dispatcher` | `disp2026` | 👷 Диспетчер |
+                | `admin` | `admin2026` | 🔑 Адміністратор |
+                | `brigade1` | `brigade1` | 🪖 Монтер (Бригада №1) |
+                | `brigade2` | `brigade2` | 🪖 Монтер (Бригада №2) |
+                | `crm_manager` | `crm2026` | 💰 Менеджер CRM |
+                """)
     st.stop()
 
 current_user = st.session_state.current_user
@@ -1004,6 +1067,7 @@ tab_map = dict(zip(tab_keys, rendered_tabs))
 
 # ==========================================
 # ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ FOLIUM ГІС
+# (усі користувацькі значення екрануються: tooltip/popup у Leaflet рендеряться як HTML)
 # ==========================================
 def get_marker_color(status):
     if "АВАРІЯ" in status:        return "red"
@@ -1019,16 +1083,16 @@ def build_popup_html(obj):
     badge_color = next((v for k, v in color_map.items() if k in status), "#10b981")
     return f"""
     <div style="font-family:sans-serif;min-width:230px;padding:4px 2px">
-      <b style="font-size:14px">{obj['name']}</b>
+      <b style="font-size:14px">{esc(str(obj['name']))}</b>
       <span style="float:right;background:{badge_color};color:#fff;border-radius:4px;
-                   padding:1px 7px;font-size:11px">{status}</span>
+                   padding:1px 7px;font-size:11px">{esc(str(status))}</span>
       <hr style="margin:6px 0">
       <table style="width:100%;font-size:12px;border-collapse:collapse">
-        <tr><td style="color:#666;padding:2px 0">Тип:</td><td><b>{obj.get('type','—')}</b></td></tr>
-        <tr><td style="color:#666;padding:2px 0">Критичність:</td><td><b>{obj.get('criticality','—')}</b></td></tr>
-        <tr><td style="color:#666;padding:2px 0">СО:</td><td>{obj.get('subdivision','—')}</td></tr>
+        <tr><td style="color:#666;padding:2px 0">Тип:</td><td><b>{esc(str(obj.get('type','—')))}</b></td></tr>
+        <tr><td style="color:#666;padding:2px 0">Критичність:</td><td><b>{esc(str(obj.get('criticality','—')))}</b></td></tr>
+        <tr><td style="color:#666;padding:2px 0">СО:</td><td>{esc(str(obj.get('subdivision','—')))}</td></tr>
         <tr><td style="color:#666;padding:2px 0;vertical-align:top">Опис:</td>
-            <td style="color:#333">{obj.get('desc','—')}</td></tr>
+            <td style="color:#333">{esc(str(obj.get('desc','—')))}</td></tr>
         <tr><td style="color:#666;padding:2px 0">Координати:</td>
             <td>{obj.get('latitude',0):.4f}° N, {obj.get('longitude',0):.4f}° E</td></tr>
       </table>
@@ -1080,7 +1144,7 @@ def build_folium_map(objects, active_layers):
                 folium.CircleMarker(location=[lat,lon], radius=18, color="#ef4444",
                                     fill=True, fill_color="#ef4444", fill_opacity=0.20, weight=2).add_to(obj_group)
             folium.Marker(location=[lat,lon],
-                          tooltip=folium.Tooltip(f"<b>{obj['name']}</b><br>{obj.get('type','')}<br>Статус: {obj.get('status','')}", sticky=True),
+                          tooltip=folium.Tooltip(f"<b>{esc(str(obj['name']))}</b><br>{esc(str(obj.get('type','')))}<br>Статус: {esc(str(obj.get('status','')))}", sticky=True),
                           popup=folium.Popup(build_popup_html(obj), max_width=300),
                           icon=folium.Icon(color=color, icon=icon, prefix="fa")).add_to(obj_group)
         obj_group.add_to(fmap)
@@ -1095,18 +1159,18 @@ def build_folium_map(objects, active_layers):
             zone_popup = f"""
             <div style="font-family:sans-serif;min-width:220px;padding:4px">
               <b style="color:#dc2626">🔒 ЗАБЛОКОВАНО (LOTO)</b><br>
-              <b>{zone.get("Об'єкт")}</b><hr style="margin:6px 0">
+              <b>{esc(str(zone.get("Об'єкт")))}</b><hr style="margin:6px 0">
               <table style="width:100%;font-size:12px">
-                <tr><td style="color:#666">Бригада:</td><td><b>{zone.get('Бригада')}</b></td></tr>
-                <tr><td style="color:#666">Причина:</td><td>{zone.get('Причина')}</td></tr>
-                <tr><td style="color:#666">Початок:</td><td>{zone.get('Початок')}</td></tr>
+                <tr><td style="color:#666">Бригада:</td><td><b>{esc(str(zone.get('Бригада')))}</b></td></tr>
+                <tr><td style="color:#666">Причина:</td><td>{esc(str(zone.get('Причина')))}</td></tr>
+                <tr><td style="color:#666">Початок:</td><td>{esc(str(zone.get('Початок')))}</td></tr>
               </table>
               <p style="color:#dc2626;font-weight:bold;margin-top:6px;">НЕ ПОДАВАТИ НАПРУГУ</p>
             </div>"""
             folium.Circle(
                 location=[zlat, zlon], radius=180, color="#dc2626", weight=3,
                 dash_array="8 5", fill=True, fill_color="#dc2626", fill_opacity=0.22,
-                tooltip=folium.Tooltip(f"🔒 ЗАБЛОКОВАНО: {zone.get('Бригада')}", sticky=True),
+                tooltip=folium.Tooltip(f"🔒 ЗАБЛОКОВАНО: {esc(str(zone.get('Бригада')))}", sticky=True),
                 popup=folium.Popup(zone_popup, max_width=260),
             ).add_to(zone_lock_group)
         zone_lock_group.add_to(fmap)
@@ -1119,17 +1183,17 @@ def build_folium_map(objects, active_layers):
             fac_popup = f"""
             <div style="font-family:sans-serif;min-width:230px;padding:4px">
               <b style="color:#2563eb">🏥 АВАРІЙНА БРОНЯ</b><br>
-              <b>{fac['name']}</b><hr style="margin:6px 0">
+              <b>{esc(str(fac['name']))}</b><hr style="margin:6px 0">
               <table style="width:100%;font-size:12px">
-                <tr><td style="color:#666">Категорія:</td><td>{fac['category']}</td></tr>
-                <tr><td style="color:#666">Адреса:</td><td>{fac['address']}</td></tr>
-                <tr><td style="color:#666">Контакт:</td><td>{fac['contact']}</td></tr>
+                <tr><td style="color:#666">Категорія:</td><td>{esc(str(fac['category']))}</td></tr>
+                <tr><td style="color:#666">Адреса:</td><td>{esc(str(fac['address']))}</td></tr>
+                <tr><td style="color:#666">Контакт:</td><td>{esc(str(fac['contact']))}</td></tr>
               </table>
               <p style="color:#2563eb;font-weight:bold;margin-top:6px;">НЕ ВКЛЮЧАТИ ДО ГРАФІКІВ ВІДКЛЮЧЕНЬ</p>
             </div>"""
             folium.Marker(
                 location=[flat, flon],
-                tooltip=folium.Tooltip(f"🏥 {fac['name']} — аварійна броня", sticky=True),
+                tooltip=folium.Tooltip(f"🏥 {esc(str(fac['name']))} — аварійна броня", sticky=True),
                 popup=folium.Popup(fac_popup, max_width=280),
                 icon=folium.Icon(color="blue", icon="plus-square", prefix="fa"),
             ).add_to(shield_group)
@@ -1210,14 +1274,17 @@ if "home" in tab_map:
                 <div style="color:{color};font-size:1.5rem;font-weight:700;line-height:1.2;">{value}</div>
                 <div style="color:#64748b;font-size:0.75rem;margin-top:3px;">{label}</div>
             </div>""", unsafe_allow_html=True)
-        stat_card(s1,"🏭","8","Структурних одиниць")
-        stat_card(s2,"🔌","26","Дільниць обслуговування")
+        n_so = len(st.session_state.org_structure)
+        n_districts = sum(len(v["дільниці"]) for v in st.session_state.org_structure.values())
+        n_accidents = sum("АВАРІЯ" in o.get("status", "") for o in st.session_state.objects)
+        stat_card(s1,"🏭",str(n_so),"Структурних одиниць")
+        stat_card(s2,"🔌",str(n_districts),"Дільниць обслуговування")
         stat_card(s3,"⚡","148.5 МВт","Потужність мережі","#a78bfa")
         total_consumers = sum(d["consumers_total"] for d in CRM_DISTRICTS)
         stat_card(s4,"👥",f"{total_consumers:,}".replace(",","ʼ"),"Споживачів (CRM)","#34d399")
         total_debt = sum(d["debt_uah"] for d in CRM_DISTRICTS)
         stat_card(s5,"💸",f"{total_debt/1_000_000:.1f} млн","Загальний борг, грн","#fb923c")
-        stat_card(s6,"🚨","1","Активних аварій","#f87171")
+        stat_card(s6,"🚨",str(n_accidents),"Активних аварій","#f87171")
 
         st.markdown("<div style='margin-top:2rem'></div>", unsafe_allow_html=True)
         col_feat, col_tech = st.columns([1.1, 0.9])
@@ -1246,11 +1313,11 @@ if "home" in tab_map:
             <div style="background:#1e293b;border-radius:12px;padding:1.2rem 1.4rem;border:1px solid #334155;font-size:0.88rem;line-height:2;">
                 <table style="width:100%;border-collapse:collapse;color:#cbd5e1;">
                     <tr><td style="color:#60a5fa;width:38%;padding:4px 0;">🐍 Мова</td><td>Python 3.11+</td></tr>
-                    <tr><td style="color:#60a5fa;padding:4px 0;">🖥️ Фреймворк</td><td>Streamlit ≥ 1.35</td></tr>
+                    <tr><td style="color:#60a5fa;padding:4px 0;">🖥️ Фреймворк</td><td>Streamlit ≥ 1.37</td></tr>
                     <tr><td style="color:#60a5fa;padding:4px 0;">🗺️ Картографія</td><td>Folium + streamlit-folium</td></tr>
                     <tr><td style="color:#60a5fa;padding:4px 0;">🌡️ SmartGrid AI</td><td>Температурна модель + Anomaly Detection</td></tr>
                     <tr><td style="color:#60a5fa;padding:4px 0;">💰 CRM / Білінг</td><td>Теплова карта боргів, тарифний калькулятор</td></tr>
-                    <tr><td style="color:#60a5fa;padding:4px 0;">📊 Аналітика</td><td>Pandas + Matplotlib</td></tr>
+                    <tr><td style="color:#60a5fa;padding:4px 0;">📊 Аналітика</td><td>Pandas ≥ 2.1 + Matplotlib + Jinja2</td></tr>
                     <tr><td style="color:#60a5fa;padding:4px 0;">📦 Версія</td><td>v6.0 — травень 2026</td></tr>
                 </table>
             </div>
@@ -1258,12 +1325,7 @@ if "home" in tab_map:
 
             st.markdown("<div style='margin-top:1.2rem'></div>", unsafe_allow_html=True)
             st.markdown("### 🗂️ Охоплення мережі")
-            coverage = {
-                "СО «Вінницькі міські ЕМ»": 1, "СО «Вінницькі центральні ЕМ»": 3,
-                "СО «Жмеринські ЕМ»": 3, "СО «Хмільницькі ЕМ»": 3,
-                "СО «Гайсинські ЕМ»": 5, "СО «Могилів-Подільські ЕМ»": 4,
-                "СО «Тульчинські ЕМ»": 4, "СО «Вінницькі східні ЕМ»": 5,
-            }
+            coverage = {k: len(v["дільниці"]) for k, v in st.session_state.org_structure.items()}
             fig_h, ax_h = plt.subplots(figsize=(5, 3.2))
             fig_h.patch.set_facecolor("#1e293b")
             ax_h.set_facecolor("#1e293b")
@@ -1312,13 +1374,15 @@ if "map" in tab_map:
             if show_shield:  active_layers.append("Аварійна броня")
             if FOLIUM_AVAILABLE:
                 fmap = build_folium_map(st.session_state.objects, active_layers)
-                map_result = st_folium(fmap, width="100%", height=520, returned_objects=["last_object_clicked_popup"])
-                clicked_popup = (map_result or {}).get("last_object_clicked_popup")
-                if clicked_popup:
-                    for o in st.session_state.objects:
-                        if o["name"] in str(clicked_popup):
-                            st.session_state.selected_object = o
-                            break
+                map_result = st_folium(fmap, use_container_width=True, height=520, returned_objects=["last_object_clicked"])
+                clk = (map_result or {}).get("last_object_clicked")
+                if clk and clk.get("lat") is not None and st.session_state.objects:
+                    # точний вибір за координатами (підрядковий збіг назв плутав «ТП-1» і «ТП-12»)
+                    def _d2(o):
+                        return (o["latitude"] - clk["lat"]) ** 2 + (o["longitude"] - clk["lng"]) ** 2
+                    nearest = min(st.session_state.objects, key=_d2)
+                    if _d2(nearest) < 1e-6:
+                        st.session_state.selected_object = nearest
             else:
                 map_df = pd.DataFrame(st.session_state.objects)
                 st.map(map_df, size=40)
@@ -1405,7 +1469,7 @@ if "gis_editor" in tab_map:
 
         if st.session_state.gis_last_stock_check is not None:
             _check = st.session_state.gis_last_stock_check
-            st.markdown(f"**📦 Перевірка складу для щойно створеного об'єкта «{_check['object_name']}»:**")
+            st.markdown(f"**📦 Перевірка складу для об'єкта «{_check['object_name']}»:**")
             render_stock_warnings(_check["warnings"], context_label=_check["object_name"])
             st.session_state.gis_last_stock_check = None
 
@@ -1418,7 +1482,7 @@ if "gis_editor" in tab_map:
                 st.markdown("##### 🖱️ Клікніть на мапі, щоб обрати місце нового об'єкта")
                 editor_map = build_folium_map(st.session_state.objects, ["Об'єкти", "ЛЕП", "Зони СО"])
                 editor_result = st_folium(
-                    editor_map, width="100%", height=520,
+                    editor_map, use_container_width=True, height=520,
                     returned_objects=["last_clicked"], key="gis_editor_map"
                 )
                 clicked = (editor_result or {}).get("last_clicked")
@@ -1515,10 +1579,43 @@ if "gis_editor" in tab_map:
                         st.rerun()
 
         st.markdown("---")
+        st.markdown("##### 🔄 Змінити статус існуючого об'єкта")
+        with st.form("gis_status_change_form", clear_on_submit=False):
+            sc1, sc2, sc3 = st.columns([2, 1.5, 1])
+            sc_obj = sc1.selectbox("Об'єкт:", [o["name"] for o in st.session_state.objects], key="gis_sc_obj")
+            sc_status = sc2.selectbox("Новий статус:", GIS_STATUS_OPTIONS, key="gis_sc_status")
+            sc_submit = sc3.form_submit_button("💾 Застосувати", use_container_width=True)
+        if sc_submit:
+            target_obj = next((o for o in st.session_state.objects if o["name"] == sc_obj), None)
+            if target_obj and target_obj["status"] != sc_status:
+                old_status = target_obj["status"]
+                target_obj["status"] = sc_status
+                now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
+                st.session_state.log_data.insert(0, {
+                    "Час": now_str, "Тип": "Аварія" if sc_status == "АВАРІЯ" else "Інспекція",
+                    "Об'єкт": target_obj["name"],
+                    "Опис": f"[{current_user['display_name']}] Статус змінено: {old_status} → {sc_status}.",
+                    "Критичність": target_obj.get("criticality", "Середня") if sc_status == "АВАРІЯ" else "Низька",
+                })
+                st.session_state.gis_edit_log.insert(0, {
+                    "Час": now_str, "Дія": f"Статус: {old_status} → {sc_status}",
+                    "Об'єкт": target_obj["name"], "Тип": target_obj["type"],
+                    "Координати": f"{target_obj['latitude']:.5f}, {target_obj['longitude']:.5f}",
+                    "Автор": current_user["display_name"],
+                })
+                if sc_status == "АВАРІЯ":
+                    st.session_state.gis_last_stock_check = {
+                        "object_name": target_obj["name"],
+                        "warnings": check_stock_warnings_for_object(target_obj),
+                    }
+                st.rerun()
+            else:
+                st.info("Статус не змінено.")
+
         col_list, col_audit = st.columns([1.3, 1])
 
         with col_list:
-            st.markdown("##### 📋 Усі об'єкти мережі (редагування / видалення)")
+            st.markdown("##### 📋 Усі об'єкти мережі (видалення)")
             for idx, o in enumerate(st.session_state.objects):
                 with st.container(border=True):
                     hc1, hc2, hc3 = st.columns([2, 1, 0.6])
@@ -1526,6 +1623,8 @@ if "gis_editor" in tab_map:
                     hc2.caption(f"{o['latitude']:.4f}° N, {o['longitude']:.4f}° E")
                     if hc3.button("🗑️", key=f"gis_del_{idx}_{o['name']}", help="Видалити об'єкт"):
                         removed = st.session_state.objects.pop(idx)
+                        if st.session_state.selected_object is removed and st.session_state.objects:
+                            st.session_state.selected_object = st.session_state.objects[0]
                         now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
                         st.session_state.gis_edit_log.insert(0, {
                             "Час": now_str, "Дія": "Видалення",
@@ -1541,8 +1640,8 @@ if "gis_editor" in tab_map:
             if st.session_state.gis_edit_log:
                 st.dataframe(pd.DataFrame(st.session_state.gis_edit_log),
                              use_container_width=True, hide_index=True, height=340)
-                audit_csv = pd.DataFrame(st.session_state.gis_edit_log).to_csv(index=False).encode("utf-8")
-                st.download_button("📥 Завантажити журнал GIS (.csv)", data=audit_csv,
+                st.download_button("📥 Завантажити журнал GIS (.csv)",
+                                   data=to_csv_bytes(pd.DataFrame(st.session_state.gis_edit_log)),
                                    file_name="gis_editor_log.csv", mime="text/csv", use_container_width=True)
             else:
                 st.caption("Ще немає жодної зміни в цій сесії.")
@@ -1619,7 +1718,7 @@ if "assets" in tab_map:
             return f"color: {colors.get(val, '#94a3b8')}; font-weight: bold"
 
         if not inv_display_df.empty:
-            st.dataframe(inv_display_df.style.map(_color_asset_status, subset=["Статус"]),
+            st.dataframe(style_map(inv_display_df.style, _color_asset_status, ["Статус"]),
                          use_container_width=True, hide_index=True, height=380)
         else:
             st.info("Немає позицій за обраними фільтрами.")
@@ -1695,8 +1794,8 @@ if "assets" in tab_map:
                             st.rerun()
 
             st.markdown("---")
-            inv_export_csv = pd.DataFrame(st.session_state.inventory).to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Завантажити повний звіт складу (.csv)", data=inv_export_csv,
+            st.download_button("📥 Завантажити повний звіт складу (.csv)",
+                               data=to_csv_bytes(pd.DataFrame(st.session_state.inventory)),
                                file_name="inventory_report.csv", mime="text/csv")
         else:
             st.caption("ℹ️ Редагування складу доступне диспетчеру та адміністратору.")
@@ -1781,7 +1880,7 @@ if "requests" in tab_map:
         f_priority = flt3.selectbox("Пріоритет:", ["Усі"] + list(REQUEST_PRIORITY_SLA_HOURS.keys()))
         f_search = flt4.text_input("🔍 Пошук (ПІБ/адреса):")
 
-        brigade_names = ["Бригада №1 (ОВБ Центр)", "Бригада №2 (Шаргородська дільниця)"]
+        brigade_names = BRIGADE_NAMES
 
         filtered = all_reqs
         if is_brigade:
@@ -1805,7 +1904,7 @@ if "requests" in tab_map:
             with st.container(border=True):
                 hcol1, hcol2, hcol3 = st.columns([2.2, 1, 1])
                 hcol1.markdown(f"**{req['id']} — {req['ПІБ / Організація']}** · {req['Телефон']}")
-                hcol2.markdown(f"<span style='color:{status_colors.get(req['Статус'],'#64748b')};font-weight:700'>{req['Статус']}</span>", unsafe_allow_html=True)
+                hcol2.markdown(f"<span style='color:{status_colors.get(req['Статус'],'#64748b')};font-weight:700'>{esc(req['Статус'])}</span>", unsafe_allow_html=True)
                 hcol3.markdown(f"<span style='color:{sla_color};font-size:0.85rem'>{sla_label}</span>", unsafe_allow_html=True)
                 st.caption(f"📍 {req['Адреса'] or '—'} · 🏷️ {req['Тип звернення']} · ⚡ Пріоритет: {req['Пріоритет']} · 🕐 {req['Створено']}")
                 st.write(req["Опис"])
@@ -1848,12 +1947,18 @@ if "requests" in tab_map:
             st.markdown("---")
             export_df = pd.DataFrame([{k: v for k, v in r.items() if k != "_created_dt"} for r in all_reqs])
             st.download_button("📥 Завантажити реєстр заявок (.csv)",
-                                data=export_df.to_csv(index=False).encode("utf-8"),
+                                data=to_csv_bytes(export_df),
                                 file_name="client_requests.csv", mime="text/csv")
 
 # ==========================================
 # 🚨 ВКЛАДКА: ОПЕРАТИВНИЙ ЧАТ / ЦЕНТР СПОВІЩЕНЬ
 # ==========================================
+def _apply_notif_template():
+    """Підставляє обраний шаблон у текст повідомлення (виконується до перемальовування форми)."""
+    t = st.session_state.get("notif_template", NOTIFY_TEMPLATES[0])
+    if t != NOTIFY_TEMPLATES[0]:
+        st.session_state.notif_message = t
+
 if "notifications" in tab_map:
     with tab_map["notifications"]:
         st.title("🚨 Оперативний чат / Центр сповіщень")
@@ -1901,16 +2006,20 @@ if "notifications" in tab_map:
         # ── Форма надсилання (лише диспетчер / адмін) ─────────
         if can_send_notif:
             with st.expander("➕ Надіслати нове сповіщення бригаді", expanded=True):
+                # скидання шаблону після успішного надсилання (до створення віджета)
+                if st.session_state.pop("_notif_tpl_reset", False):
+                    st.session_state.notif_template = NOTIFY_TEMPLATES[0]
+                # шаблон — ПОЗА формою, щоб його вибір одразу підставляв текст у поле повідомлення
+                st.selectbox("📋 Швидкий шаблон (необов'язково):", NOTIFY_TEMPLATES,
+                             key="notif_template", on_change=_apply_notif_template)
                 with st.form("send_notification_form", clear_on_submit=True):
                     fn1, fn2, fn3 = st.columns(3)
                     notif_recipient = fn1.selectbox("Отримувач:", NOTIFY_RECIPIENTS)
                     notif_priority = fn2.selectbox("Пріоритет:", list(NOTIFY_PRIORITIES.keys()))
                     notif_channel = fn3.selectbox("Канал доставки:", NOTIFY_CHANNELS)
 
-                    notif_template = st.selectbox("📋 Швидкий шаблон (необов'язково):", NOTIFY_TEMPLATES)
                     notif_subject = st.text_input("Тема:", placeholder="напр. Зміна погодних умов")
-                    default_msg = notif_template if notif_template != "— оберіть шаблон —" else ""
-                    notif_message = st.text_area("Текст повідомлення:", value=default_msg, height=100,
+                    notif_message = st.text_area("Текст повідомлення:", key="notif_message", height=100,
                                                   placeholder="Опишіть термінове оновлення для бригади...")
 
                     notif_submitted = st.form_submit_button("🚨 Надіслати сповіщення", type="primary", use_container_width=True)
@@ -1939,6 +2048,7 @@ if "notifications" in tab_map:
                                 "Опис": f"[{current_user['display_name']}] 🚨 Сповіщення ({notif_priority}) через {notif_channel}: «{notif_subject.strip() or 'Без теми'}» — {notif_message.strip()}",
                                 "Критичність": "Критична" if notif_priority == "🔴 Термінове" else "Висока"
                             })
+                            st.session_state["_notif_tpl_reset"] = True
                             st.toast(f"🚨 Сповіщення надіслано: {notif_recipient}")
                             st.success(f"✅ Сповіщення «{notif_subject.strip() or 'Без теми'}» надіслано ({notif_channel}).")
                             st.rerun()
@@ -1970,7 +2080,7 @@ if "notifications" in tab_map:
             already_read_by_me = current_user["login"] in n["Прочитано_ким"]
             with st.container(border=True):
                 hn1, hn2, hn3 = st.columns([2.2, 1, 1])
-                hn1.markdown(f"<span style='color:{prio_color};font-weight:700'>{n['Пріоритет']}</span> — **{n['Тема']}**", unsafe_allow_html=True)
+                hn1.markdown(f"<span style='color:{prio_color};font-weight:700'>{esc(n['Пріоритет'])}</span> — <b>{esc(str(n['Тема']))}</b>", unsafe_allow_html=True)
                 status_disp = "✅ Прочитано" if n["Статус"] == "Прочитано" else "📬 Доставлено"
                 hn2.caption(status_disp)
                 hn3.caption(n["Канал"])
@@ -1993,7 +2103,7 @@ if "notifications" in tab_map:
             st.markdown("---")
             notif_export_df = pd.DataFrame([{k: v for k, v in n.items() if k not in ("_dt", "Прочитано_ким")} for n in all_notifs])
             st.download_button("📥 Завантажити журнал сповіщень (.csv)",
-                                data=notif_export_df.to_csv(index=False).encode("utf-8"),
+                                data=to_csv_bytes(notif_export_df),
                                 file_name="notifications_log.csv", mime="text/csv")
 
 # ==========================================
@@ -2098,7 +2208,7 @@ if "safety" in tab_map:
                 briefs_df = pd.DataFrame([{k: v for k, v in b.items() if k not in ("id", "_dt")} for b in briefs_filtered])
                 st.dataframe(briefs_df, use_container_width=True, hide_index=True)
                 st.download_button("📥 Завантажити журнал інструктажів (.csv)",
-                                   data=briefs_df.to_csv(index=False).encode("utf-8"),
+                                   data=to_csv_bytes(briefs_df),
                                    file_name="safety_briefings_log.csv", mime="text/csv")
             else:
                 st.caption("Записів не знайдено за обраними фільтрами.")
@@ -2164,21 +2274,22 @@ if "safety" in tab_map:
                 return f"color: {colors.get(val, '#94a3b8')}; font-weight: bold"
 
             if not ppe_display_df.empty:
-                st.dataframe(ppe_display_df.style.map(_color_ppe_status, subset=["Статус"]),
+                st.dataframe(style_map(ppe_display_df.style, _color_ppe_status, ["Статус"]),
                              use_container_width=True, hide_index=True, height=340)
             else:
                 st.info("Немає позицій за обраними фільтрами.")
 
             if can_manage_safety:
                 st.markdown("#### 🔬 Зареєструвати проходження перевірки / випробування")
+                # бригада — ПОЗА формою, щоб список позицій ЗІЗ оновлювався одразу після зміни бригади
+                test_brigade = st.selectbox("Бригада:", BRIGADE_NAMES, key="ppe_test_brigade")
+                ppe_options_for_brigade = [
+                    f"{i['Тип ЗІЗ']} ({i['Інв. №']})" for i in st.session_state.ppe_inventory if i["Бригада"] == test_brigade
+                ]
                 with st.form("ppe_test_form"):
                     pt1, pt2 = st.columns(2)
-                    test_brigade = pt1.selectbox("Бригада:", BRIGADE_NAMES, key="ppe_test_brigade")
-                    ppe_options_for_brigade = [
-                        f"{i['Тип ЗІЗ']} ({i['Інв. №']})" for i in st.session_state.ppe_inventory if i["Бригада"] == test_brigade
-                    ]
-                    test_item_label = pt2.selectbox("Позиція ЗІЗ:", ppe_options_for_brigade, key="ppe_test_item")
-                    test_date = st.date_input("Дата проходження перевірки:", datetime.date.today(), key="ppe_test_date")
+                    test_item_label = pt1.selectbox("Позиція ЗІЗ:", ppe_options_for_brigade, key=f"ppe_test_item_{test_brigade}")
+                    test_date = pt2.date_input("Дата проходження перевірки:", datetime.date.today(), key="ppe_test_date")
                     ppe_test_submitted = st.form_submit_button("✅ Зареєструвати перевірку", use_container_width=True)
                     if ppe_test_submitted:
                         for i in st.session_state.ppe_inventory:
@@ -2192,12 +2303,11 @@ if "safety" in tab_map:
                                     "Критичність": "Низька",
                                 })
                                 break
-                        st.success(f"✅ Перевірку зафіксовано. Наступна дата перерахована автоматично.")
+                        st.success("✅ Перевірку зафіксовано. Наступна дата перерахована автоматично.")
                         st.rerun()
 
                 st.markdown("---")
-                ppe_export_csv = ppe_display_df.to_csv(index=False).encode("utf-8")
-                st.download_button("📥 Завантажити звіт по ЗІЗ (.csv)", data=ppe_export_csv,
+                st.download_button("📥 Завантажити звіт по ЗІЗ (.csv)", data=to_csv_bytes(ppe_display_df),
                                    file_name="ppe_monitoring_report.csv", mime="text/csv")
             else:
                 st.caption("ℹ️ Реєстрація проходження перевірок ЗІЗ доступна диспетчеру та адміністратору.")
@@ -2220,7 +2330,7 @@ if "safety" in tab_map:
 
             if FOLIUM_AVAILABLE:
                 loto_map = build_folium_map(st.session_state.objects, ["Об'єкти", "Небезпечні зони"])
-                st_folium(loto_map, width="100%", height=460, returned_objects=[], key="safety_loto_map")
+                st_folium(loto_map, use_container_width=True, height=460, returned_objects=[], key="safety_loto_map")
             else:
                 st.warning("⚠️ Бібліотеки `folium` та `streamlit-folium` не встановлені.")
 
@@ -2289,7 +2399,7 @@ if "safety" in tab_map:
                 } for z in st.session_state.danger_zones])
                 st.dataframe(zones_hist_df, use_container_width=True, hide_index=True)
                 st.download_button("📥 Завантажити історію зон (.csv)",
-                                   data=zones_hist_df.to_csv(index=False).encode("utf-8"),
+                                   data=to_csv_bytes(zones_hist_df),
                                    file_name="danger_zones_history.csv", mime="text/csv")
             else:
                 st.caption("Історія порожня.")
@@ -2354,21 +2464,23 @@ if "documents" in tab_map:
             # ── Форма створення нового наряду-допуску (диспетчер/адмін) ──
             if can_issue_permits:
                 with st.expander("➕ Оформити новий наряд-допуск", expanded=False):
+                    # бригада — ПОЗА формою: склад та керівник залежать від неї й мають оновлюватись одразу
+                    permit_brigade = st.selectbox("Бригада-виконавець:", BRIGADE_NAMES, key="permit_brigade")
+                    roster_for_brigade = [e for e in EMPLOYEE_ROSTER if e["brigade"] == permit_brigade]
                     with st.form("new_permit_form", clear_on_submit=True):
-                        pf1, pf2, pf3 = st.columns(3)
+                        pf1, pf2 = st.columns(2)
                         permit_object = pf1.selectbox("Об'єкт мережі:", [o["name"] for o in st.session_state.objects], key="permit_object")
                         permit_worktype = pf2.selectbox("Вид робіт:", PERMIT_WORK_TYPES, key="permit_worktype")
-                        permit_brigade = pf3.selectbox("Бригада-виконавець:", BRIGADE_NAMES, key="permit_brigade")
 
                         pf4, pf5 = st.columns(2)
-                        roster_for_brigade = [e for e in EMPLOYEE_ROSTER if e["brigade"] == permit_brigade]
                         leader_options = [e["name"] for e in roster_for_brigade] or [""]
-                        permit_leader = pf4.selectbox("Відповідальний керівник робіт:", leader_options, key="permit_leader")
+                        permit_leader = pf4.selectbox("Відповідальний керівник робіт:", leader_options,
+                                                       key=f"permit_leader_{permit_brigade}")
                         permit_admitter = pf5.text_input("Допускач (видає наряд):", value=current_user["display_name"], key="permit_admitter")
 
                         permit_crew = st.multiselect(
                             "Склад бригади:", [e["name"] for e in roster_for_brigade],
-                            default=[e["name"] for e in roster_for_brigade], key="permit_crew"
+                            default=[e["name"] for e in roster_for_brigade], key=f"permit_crew_{permit_brigade}"
                         )
                         permit_task = st.text_area("Зміст завдання:", height=80,
                                                     placeholder="напр. Планове ТО силового трансформатора, заміна ізоляторів...")
@@ -2382,7 +2494,7 @@ if "documents" in tab_map:
                         permit_validity_days = pf6.number_input("Термін дії наряду, днів:", min_value=1, max_value=15, value=1, key="permit_validity")
                         permit_signed_by_admitter = pf7.checkbox("✅ Допускач підписує наряд (ЕЦП)", value=True)
 
-                        permit_submitted = st.form_submit_button("📄 Оформити наряд-допуск (Чернетка)", type="primary", use_container_width=True)
+                        permit_submitted = st.form_submit_button("📄 Оформити та погодити наряд-допуск", type="primary", use_container_width=True)
 
                         if permit_submitted:
                             if not permit_task.strip():
@@ -2453,7 +2565,7 @@ if "documents" in tab_map:
                     hp1, hp2, hp3 = st.columns([2.2, 1.2, 1])
                     _permit_obj_name = permit["Об'єкт"]
                     hp1.markdown(f"**{permit['id']} — {_permit_obj_name}** · {permit['Вид робіт']}")
-                    hp2.markdown(f"<span style='color:{status_color};font-weight:700'>{permit['Статус']}</span>", unsafe_allow_html=True)
+                    hp2.markdown(f"<span style='color:{status_color};font-weight:700'>{esc(permit['Статус'])}</span>", unsafe_allow_html=True)
                     if is_overdue:
                         hp3.markdown("<span style='color:#ef4444;font-weight:700'>🚨 Прострочено</span>", unsafe_allow_html=True)
                     else:
@@ -2584,7 +2696,7 @@ if "documents" in tab_map:
                 permits_export_df = pd.DataFrame([{k: v for k, v in p.items() if k != "_created_dt"} for p in visible_permits])
                 st.download_button(
                     "📥 Завантажити повний реєстр нарядів-допусків (.csv)",
-                    data=permits_export_df.to_csv(index=False).encode("utf-8"),
+                    data=to_csv_bytes(permits_export_df),
                     file_name="permits_archive.csv", mime="text/csv"
                 )
 
@@ -2657,7 +2769,7 @@ if "documents" in tab_map:
             } for d in NORMATIVE_LIBRARY])
             st.download_button(
                 "📥 Завантажити повну бібліотеку НД (.csv)",
-                data=lib_export_df.to_csv(index=False).encode("utf-8"),
+                data=to_csv_bytes(lib_export_df),
                 file_name="normative_library.csv", mime="text/csv"
             )
 
@@ -2713,7 +2825,7 @@ if "ukrenergo" in tab_map:
                     ug1, ug2 = st.columns(2)
                     new_level = ug1.selectbox("Рівень обмеження (розпорядження Укренерго):", GPV_RESTRICTION_LEVELS,
                                                index=GPV_RESTRICTION_LEVELS.index(st.session_state.gpv_current_level))
-                    ug2.file_uploader("Файл ГПВ від Укренерго (необов'язково, .csv/.pdf):", type=["csv", "pdf"], key="gpv_file")
+                    gpv_file = ug2.file_uploader("Файл ГПВ від Укренерго (довідково, .csv/.pdf):", type=["csv", "pdf"], key="gpv_file")
                     gpv_submitted = st.form_submit_button("📥 Застосувати графік", type="primary", use_container_width=True)
                     if gpv_submitted:
                         st.session_state.gpv_current_level = new_level
@@ -2721,7 +2833,8 @@ if "ukrenergo" in tab_map:
                         now_dt = datetime.datetime.now()
                         update_entry = {
                             "Час": now_dt.strftime("%d.%m.%Y %H:%M"),
-                            "Джерело": "НЕК «Укренерго» — офіційне диспетчерське розпорядження",
+                            "Джерело": "НЕК «Укренерго» — офіційне диспетчерське розпорядження"
+                                       + (f" (файл: {gpv_file.name})" if gpv_file is not None else ""),
                             "Ким внесено": current_user["display_name"],
                         }
                         st.session_state.gpv_last_update = update_entry
@@ -2748,6 +2861,7 @@ if "ukrenergo" in tab_map:
                         })
                         st.success(f"✅ Графік ГПВ оновлено: {new_level}. Дані розіслано бригадам.")
                         st.rerun()
+                st.caption("ℹ️ Графік генерується за обраним рівнем обмеження; завантажений файл лише фіксується в історії (автоматичний розбір файлу не реалізовано).")
 
             st.markdown("#### 🗓️ Матриця відключень по чергах (сьогодні)")
             hours_labels = [f"{h:02d}" for h in range(24)]
@@ -2805,7 +2919,7 @@ if "ukrenergo" in tab_map:
 
             if FOLIUM_AVAILABLE:
                 shield_map = build_folium_map(st.session_state.objects, ["Об'єкти", "Аварійна броня"])
-                st_folium(shield_map, width="100%", height=460, returned_objects=[], key="shield_map")
+                st_folium(shield_map, use_container_width=True, height=460, returned_objects=[], key="shield_map")
             else:
                 st.warning("⚠️ Бібліотеки `folium` та `streamlit-folium` не встановлені.")
 
@@ -2818,7 +2932,7 @@ if "ukrenergo" in tab_map:
             } for f in facilities_filtered])
             st.dataframe(facilities_df, use_container_width=True, hide_index=True)
             st.download_button("📥 Завантажити реєстр аварійної броні (.csv)",
-                               data=facilities_df.to_csv(index=False).encode("utf-8"),
+                               data=to_csv_bytes(facilities_df),
                                file_name="protected_facilities.csv", mime="text/csv")
 
             if can_manage_ukrenergo:
@@ -2861,6 +2975,11 @@ if "ukrenergo" in tab_map:
 # ==========================================
 # 🎓 ВКЛАДКА: НАВЧАННЯ ТА ТЕСТУВАННЯ (LMS)
 # ==========================================
+def _clear_lms_answers():
+    """Скидає збережені відповіді радіо-кнопок, щоб новий тест не показував відповіді попереднього."""
+    for k in [k for k in st.session_state.keys() if str(k).startswith("lms_answer_")]:
+        st.session_state.pop(k, None)
+
 if "lms" in tab_map:
     with tab_map["lms"]:
         st.title("🎓 Навчання та Тестування — LMS")
@@ -2899,7 +3018,7 @@ if "lms" in tab_map:
                     )
                     st.markdown(
                         f"**Поточний статус атестації:** "
-                        f"<span style='color:{cert_color};font-weight:bold'>{cert_label}</span>{days_suffix}",
+                        f"<span style='color:{cert_color};font-weight:bold'>{esc(cert_label)}</span>{days_suffix}",
                         unsafe_allow_html=True
                     )
 
@@ -2908,7 +3027,14 @@ if "lms" in tab_map:
                             q for q in LMS_QUESTION_BANK if q["topic"] == topic_choice
                         ]
                         n = min(LMS_TEST_QUESTIONS_COUNT, len(pool))
-                        selected_questions = _rnd.sample(pool, n)
+                        selected_questions = []
+                        for q in _sys_rnd.sample(pool, n):
+                            # перемішуємо варіанти, щоб правильна відповідь не стояла завжди на одному місці
+                            opts = list(q["options"])
+                            correct_text = opts[q["correct"]]
+                            _sys_rnd.shuffle(opts)
+                            selected_questions.append({**q, "options": opts, "correct": opts.index(correct_text)})
+                        _clear_lms_answers()
                         st.session_state.lms_current_test = {
                             "employee_id": selected_emp["id"], "employee_name": selected_emp["name"],
                             "brigade": selected_emp["brigade"], "topic": topic_choice,
@@ -2937,6 +3063,7 @@ if "lms" in tab_map:
                     test_cancelled = col_cancel.form_submit_button("❌ Скасувати тест", use_container_width=True)
 
                 if test_cancelled:
+                    _clear_lms_answers()
                     st.session_state.lms_current_test = None
                     st.rerun()
 
@@ -2976,6 +3103,7 @@ if "lms" in tab_map:
                             ),
                             "Критичність": "Низька" if passed else "Висока",
                         })
+                        _clear_lms_answers()
                         st.session_state.lms_current_test = None
 
                         if passed:
@@ -3034,7 +3162,7 @@ if "lms" in tab_map:
                           "🔴 Прострочено": "#ef4444", "🔴 Не атестований": "#ef4444"}
                 return f"color: {colors.get(val, '#94a3b8')}; font-weight: bold"
 
-            st.dataframe(pd.DataFrame(cert_rows).style.map(_color_cert_status, subset=["Статус"]),
+            st.dataframe(style_map(pd.DataFrame(cert_rows).style, _color_cert_status, ["Статус"]),
                          use_container_width=True, hide_index=True)
 
             st.markdown("---")
@@ -3075,7 +3203,7 @@ if "lms" in tab_map:
                     } for a in st.session_state.lms_test_attempts])
                     st.dataframe(hist_df, use_container_width=True, hide_index=True)
                     st.download_button("📥 Завантажити історію тестування (.csv)",
-                                       data=hist_df.to_csv(index=False).encode("utf-8"),
+                                       data=to_csv_bytes(hist_df),
                                        file_name="lms_test_history.csv", mime="text/csv")
                 else:
                     st.caption("Історія порожня.")
@@ -3087,6 +3215,8 @@ if "geo_lat" not in st.session_state:
     st.session_state.geo_lat = None
 if "geo_lon" not in st.session_state:
     st.session_state.geo_lon = None
+if "geo_time" not in st.session_state:
+    st.session_state.geo_time = ""
 if "voice_transcript" not in st.session_state:
     st.session_state.voice_transcript = ""
 if "uploaded_photos" not in st.session_state:
@@ -3113,8 +3243,8 @@ if "mobile" in tab_map:
         hdr1.markdown(f"""
         <div style="background:#1e293b;border-radius:8px;padding:0.7rem 1rem;border:1px solid #334155;">
             <div style="color:#64748b;font-size:0.75rem;">👷 Оператор</div>
-            <div style="color:#f1f5f9;font-weight:600;font-size:0.9rem;">{current_user['display_name']}</div>
-            <div style="color:#94a3b8;font-size:0.75rem;">{current_user['subdivision']}</div>
+            <div style="color:#f1f5f9;font-weight:600;font-size:0.9rem;">{esc(current_user['display_name'])}</div>
+            <div style="color:#94a3b8;font-size:0.75rem;">{esc(current_user['subdivision'])}</div>
         </div>""", unsafe_allow_html=True)
         geo_status_color = "#22c55e" if st.session_state.geo_arrived else "#f59e0b"
         geo_status_label = "📍 Прибуття зафіксовано" if st.session_state.geo_arrived else "⏳ Очікування прибуття"
@@ -3189,8 +3319,8 @@ if "mobile" in tab_map:
                             manual_lat = g1.number_input("Широта (N)", value=48.7364, format="%.4f")
                             manual_lon = g2.number_input("Довгота (E)", value=28.0822, format="%.4f")
                         else:
-                            manual_lat = TP_TARGET["lat"] + _rnd.uniform(-0.002, 0.002)
-                            manual_lon = TP_TARGET["lon"] + _rnd.uniform(-0.002, 0.002)
+                            manual_lat = TP_TARGET["lat"] + _sys_rnd.uniform(-0.002, 0.002)
+                            manual_lon = TP_TARGET["lon"] + _sys_rnd.uniform(-0.002, 0.002)
                         if st.button("📍 Я на місці — зафіксувати прибуття", use_container_width=True, type="primary"):
                             now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
                             st.session_state.geo_lat   = round(manual_lat, 4)
@@ -3255,6 +3385,8 @@ if "mobile" in tab_map:
                         if uploaded_files:
                             st.session_state.uploaded_photos = [{"name": f.name, "bytes": f.getvalue(), "source": "upload"} for f in uploaded_files]
                             st.success(f"✅ Прикріплено {len(uploaded_files)} фото")
+                        else:
+                            st.session_state.uploaded_photos = []  # файли видалено з завантажувача — не рахуємо застарілі
 
                     photo_count = len(st.session_state.camera_shots) + len(st.session_state.uploaded_photos)
 
@@ -3353,11 +3485,11 @@ if "structure" in tab_map:
                     {"name":"ЦОК Шаргород","latitude":48.7390,"longitude":28.0805,"type":"Центр клієнтів","status":"Нормальна","criticality":"Низька","subdivision":"СО «Жмеринські ЕМ»","desc":"Прийом споживачів."},
                 ]
                 for o in sh_objects:
-                    folium.Marker(location=[o["latitude"],o["longitude"]], tooltip=o["name"],
+                    folium.Marker(location=[o["latitude"],o["longitude"]], tooltip=esc(o["name"]),
                                   popup=folium.Popup(build_popup_html(o), max_width=280),
                                   icon=folium.Icon(color=get_marker_color(o["status"]), icon=get_marker_icon(o["type"]), prefix="fa")).add_to(sh_map)
                 folium.PolyLine([[48.7364,28.0822],[48.7390,28.0805]], color="#4ade80", weight=2, dash_array="4 3").add_to(sh_map)
-                st_folium(sh_map, width="100%", height=300, returned_objects=[])
+                st_folium(sh_map, use_container_width=True, height=300, returned_objects=[])
 
 # ==========================================
 # ВКЛАДКА: АНАЛІТИКА ТА KPI
@@ -3390,7 +3522,8 @@ if "analytics" in tab_map:
         hours = [f"{i}:00" for i in range(0, 25, 4)]
         LOAD_THRESHOLD_HIGH = 160.0; LOAD_THRESHOLD_LOW = 35.0
         def compute_load_for_temp(base_load, temp):
-            if temp < 0: factor = 1.0 + 0.04 * abs(temp)
+            # безперервна модель: 0 °C → 1.225; мінімум близько +15…+20 °C; зростання в спеку (кондиціонери)
+            if temp < 0: factor = 1.225 + 0.04 * abs(temp)
             elif temp <= 20: factor = 1.0 - 0.015 * (temp - 15)
             else: factor = 0.925 + 0.025 * (temp - 20)
             return [round(v * factor, 1) for v in base_load]
@@ -3409,7 +3542,8 @@ if "analytics" in tab_map:
         ax1.set_title(f"Прогноз навантаження при {temperature}°C", color="#f1f5f9", fontsize=10)
         ax1.legend(fontsize=7, facecolor="#1e293b", edgecolor="#334155", labelcolor="#cbd5e1")
         ax1.grid(True, alpha=0.15, color="#334155"); ax1.tick_params(colors="#64748b"); ax1.spines[:].set_color("#334155")
-        ax1.set_ylabel("МВт", color="#64748b", fontsize=9); ax1.set_ylim(0, 200)
+        ax1.set_ylabel("МВт", color="#64748b", fontsize=9)
+        ax1.set_ylim(0, max(200, max(max(predicted_load), max(actual_load)) * 1.1))
         ax2.set_facecolor("#1e293b")
         current_logs_df = pd.DataFrame(st.session_state.log_data)
         types_distribution = current_logs_df["Тип"].value_counts()
@@ -3581,7 +3715,7 @@ if "diagnostics" in tab_map:
                     def _color_episode_status(val):
                         colors = {"🔴 Критичне відхилення (поза ГОСТ)": "#ef4444", "🟡 Попередження (межа допуску)": "#f59e0b"}
                         return f"color: {colors.get(val, '#94a3b8')}; font-weight: bold"
-                    st.dataframe(pd.DataFrame(episodes).style.map(_color_episode_status, subset=["Найгірший статус"]),
+                    st.dataframe(style_map(pd.DataFrame(episodes).style, _color_episode_status, ["Найгірший статус"]),
                                  use_container_width=True, hide_index=True)
                 else:
                     st.caption("Епізодів відхилень не виявлено.")
@@ -3620,10 +3754,10 @@ if "diagnostics" in tab_map:
                         colors = {"🔴 Критичне відхилення (поза ГОСТ)": "#ef4444",
                                   "🟡 Попередження (межа допуску)": "#f59e0b", "🟢 Норма": "#22c55e"}
                         return f"color: {colors.get(val, '#94a3b8')}; font-weight: bold"
-                    st.dataframe(work_df.style.map(_color_row_status, subset=["Статус"]),
+                    st.dataframe(style_map(work_df.style, _color_row_status, ["Статус"]),
                                  use_container_width=True, hide_index=True, height=300)
                     st.download_button("📥 Завантажити оброблений лог (.csv)",
-                                       data=work_df.to_csv(index=False).encode("utf-8"),
+                                       data=to_csv_bytes(work_df),
                                        file_name="voltage_anomaly_report.csv", mime="text/csv")
         else:
             st.caption("Завантажте CSV-файл або згенеруйте демо-лог, щоб почати аналіз.")
@@ -3759,8 +3893,11 @@ if "crm" in tab_map:
 
             with col_ch2:
                 st.markdown("#### 💰 Структура боргу за категоріями споживачів")
-                debt_cats = {"Населення": 12.8, "ОСББ / ЖКГ": 7.4, "Підприємства": 9.1,
-                             "Бюджетні орг.": 3.2, "Агросектор": 4.7}
+                # частки категорій масштабуються до реального загального боргу (щоб діаграма збігалась з KPI)
+                _debt_share = {"Населення": 12.8, "ОСББ / ЖКГ": 7.4, "Підприємства": 9.1,
+                               "Бюджетні орг.": 3.2, "Агросектор": 4.7}
+                _k_scale = (total_debt / 1_000_000) / sum(_debt_share.values())
+                debt_cats = {k: round(v * _k_scale, 2) for k, v in _debt_share.items()}
                 fig_pie2, ax_pie2 = plt.subplots(figsize=(5, 3.8))
                 fig_pie2.patch.set_facecolor("#0f172a")
                 ax_pie2.set_facecolor("#0f172a")
@@ -3772,7 +3909,7 @@ if "crm" in tab_map:
                 )
                 for t in texts2: t.set_color("#94a3b8"); t.set_fontsize(8)
                 for at in autotexts2: at.set_color("#f1f5f9"); at.set_fontsize(8)
-                ax_pie2.set_title("Борг за категоріями, млн грн", color="#f1f5f9", fontsize=9)
+                ax_pie2.set_title(f"Борг за категоріями, млн грн (разом {total_debt/1_000_000:.1f})", color="#f1f5f9", fontsize=9)
                 plt.tight_layout()
                 st.pyplot(fig_pie2)
                 plt.close(fig_pie2)
@@ -3782,8 +3919,7 @@ if "crm" in tab_map:
                          use_container_width=True, hide_index=True)
 
             # Завантаження звіту
-            csv_crm = pay_df.to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Завантажити звіт оплат (.csv)", data=csv_crm,
+            st.download_button("📥 Завантажити звіт оплат (.csv)", data=to_csv_bytes(pay_df),
                                file_name="crm_payments_report.csv", mime="text/csv")
 
         # ─────────────────────────────────────────────────────────────────
@@ -3795,7 +3931,7 @@ if "crm" in tab_map:
             col_map_crm, col_debtors = st.columns([1.6, 1])
 
             with col_map_crm:
-                st.markdown("#### Фолія-карта боргів (Folium)")
+                st.markdown("#### Карта боргів (Folium)")
                 st.caption("Кольорове кодування: 🟢 < 2 млн грн | 🟡 2–4 млн грн | 🔴 > 4 млн грн")
 
                 if FOLIUM_AVAILABLE:
@@ -3865,7 +4001,7 @@ if "crm" in tab_map:
                       <i style="color:#64748b;font-size:10px">Розмір кола ∝ сумі боргу</i>
                     </div>"""
                     debt_map.get_root().html.add_child(folium.Element(legend_debt))
-                    st_folium(debt_map, width="100%", height=480, returned_objects=[])
+                    st_folium(debt_map, use_container_width=True, height=480, returned_objects=[])
 
                 else:
                     st.warning("⚠️ Folium не встановлено. Встановіть: `pip install folium streamlit-folium`")
@@ -4031,11 +4167,13 @@ if "crm" in tab_map:
                 pdv = round(charge_energy * 0.20, 2)
                 total_with_pdv = round(charge_energy + pdv, 2)
                 total_payable  = round(total_with_pdv + prev_debt, 2)
+                _today = datetime.date.today()
+                _period_label = f"{UA_MONTHS[_today.month - 1]} {_today.year}".upper()
 
                 st.markdown(f"""
                 <div style="background:#1e293b;border-radius:12px;padding:1.2rem 1.4rem;border:1px solid #334155;">
                   <div style="color:#93c5fd;font-size:0.8rem;font-weight:600;letter-spacing:2px;text-transform:uppercase;margin-bottom:0.8rem;">
-                    🧾 РОЗРАХУНОК — {datetime.date.today().strftime("%B %Y")}
+                    🧾 РОЗРАХУНОК — {_period_label}
                   </div>
                   <table style="width:100%;font-size:0.85rem;border-collapse:collapse;color:#cbd5e1;">
                     <tr style="border-bottom:1px solid #334155;">
@@ -4105,16 +4243,15 @@ if "crm" in tab_map:
         st.markdown("---")
         act1, act2, act3 = st.columns(3)
         with act1:
-            crm_csv = pd.DataFrame([{
+            crm_csv = to_csv_bytes(pd.DataFrame([{
                 "Дільниця": d["name"], "Споживачів": d["consumers_total"],
                 "Сплатили": d["consumers_paid"], "Борг грн": d["debt_uah"],
                 "Споживання кВт·год": d["consumption_kwh"]
-            } for d in CRM_DISTRICTS]).to_csv(index=False).encode("utf-8")
+            } for d in CRM_DISTRICTS]))
             st.download_button("📥 Повний CRM-звіт (.csv)", data=crm_csv,
                                file_name="crm_full_report.csv", mime="text/csv", use_container_width=True)
         with act2:
-            debtors_csv = pd.DataFrame(st.session_state.crm_debtors).to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Реєстр боржників (.csv)", data=debtors_csv,
+            st.download_button("📥 Реєстр боржників (.csv)", data=to_csv_bytes(pd.DataFrame(st.session_state.crm_debtors)),
                                file_name="crm_debtors.csv", mime="text/csv", use_container_width=True)
         with act3:
             if st.button("🔄 Оновити дані CRM", use_container_width=True):
@@ -4124,6 +4261,10 @@ if "crm" in tab_map:
 # ==========================================
 # ⚖️ ВКЛАДКА: ВІЗУАЛІЗАЦІЯ ЕНЕРГОБАЛАНСУ (ENERGY BALANCE)
 # ==========================================
+def _fmt_int_ua(n):
+    """Число з розділювачем розрядів «ʼ» (лише для чисел, без чіпання решти тексту)."""
+    return f"{int(n):,}".replace(",", "ʼ")
+
 if "energy_balance" in tab_map:
     with tab_map["energy_balance"]:
         st.title("⚖️ Візуалізація енергобалансу")
@@ -4223,7 +4364,7 @@ if "energy_balance" in tab_map:
             colors = {"🔴 Критичний розрив": "#ef4444", "🟡 Підвищені втрати": "#f59e0b", "🟢 Технічна норма": "#22c55e"}
             return f"color: {colors.get(val, '#94a3b8')}; font-weight: bold"
 
-        st.dataframe(balance_display_df.style.map(_color_balance_status, subset=["Статус"]),
+        st.dataframe(style_map(balance_display_df.style, _color_balance_status, ["Статус"]),
                      use_container_width=True, hide_index=True)
 
         # ── Динаміка втрат за 12 місяців ──────────────────────
@@ -4268,18 +4409,17 @@ if "energy_balance" in tab_map:
                     "Об'єкт": f"Дільниця: {trigger_district}",
                     "Опис": (
                         f"[{current_user['display_name']}] ⚖️ Виявлено розрив енергобалансу "
-                        f"{trigger_row['Втрати, %']}% (відпущено {trigger_row['Відпущено, кВт·год']:,} кВт·год, "
-                        f"спожито {trigger_row['Спожито, кВт·год']:,} кВт·год). Ініційовано позапланову перевірку "
+                        f"{trigger_row['Втрати, %']}% (відпущено {_fmt_int_ua(trigger_row['Відпущено, кВт·год'])} кВт·год, "
+                        f"спожито {_fmt_int_ua(trigger_row['Спожито, кВт·год'])} кВт·год). Ініційовано позапланову перевірку "
                         f"приладів обліку та можливих несанкціонованих підключень."
-                    ).replace(",", "ʼ"),
+                    ),
                     "Критичність": "Критична" if trigger_row["Статус"] == "🔴 Критичний розрив" else "Висока"
                 })
                 st.success(f"✅ Наряд на перевірку обліку по дільниці «{trigger_district}» створено та додано до журналу подій.")
                 st.rerun()
 
         st.markdown("---")
-        balance_csv = balance_display_df.to_csv(index=False).encode("utf-8")
-        st.download_button("📥 Завантажити звіт енергобалансу (.csv)", data=balance_csv,
+        st.download_button("📥 Завантажити звіт енергобалансу (.csv)", data=to_csv_bytes(balance_display_df),
                            file_name="energy_balance_report.csv", mime="text/csv")
 
         with st.expander("ℹ️ Як читати цей звіт"):
@@ -4318,13 +4458,14 @@ if "log" in tab_map:
             # Логіка фільтрації
             if type_filter != "Усі типи": df = df[df["Тип"] == type_filter]
             if crit_filter != "Усі рівні": df = df[df["Критичність"] == crit_filter]
-            if search_query: df = df[df["Об'єкт"].str.contains(search_query, case=False)]
+            if search_query: df = df[df["Об'єкт"].astype(str).str.contains(search_query, case=False, regex=False)]
 
         # --- Статистика по журналу ---
         c_stat1, c_stat2, c_stat3 = st.columns(3)
         c_stat1.metric("Всього записів", len(df))
         c_stat2.metric("Активних аварій", len(df[df["Тип"] == "Аварія"]))
-        c_stat3.metric("Рівень вибірки", f"{int((len(df) / len(st.session_state.log_data)) * 100)}%")
+        _log_total = len(st.session_state.log_data)
+        c_stat3.metric("Рівень вибірки", f"{int((len(df) / _log_total) * 100) if _log_total else 0}%")
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -4334,7 +4475,7 @@ if "log" in tab_map:
             return f'color: {color}; font-weight: bold'
 
         st.dataframe(
-            df.style.map(color_criticality, subset=["Критичність"]),
+            style_map(df.style, color_criticality, ["Критичність"]),
             use_container_width=True,
             hide_index=True,
             column_config={
@@ -4382,6 +4523,57 @@ if "schedule" in tab_map:
 # ==========================================
 # ВКЛАДКА: DATA ЦЕНТР (тільки Адмін)
 # ==========================================
+def parse_objects_import(uploaded):
+    """Читає CSV/XLSX/JSON з об'єктами мережі. Повертає (список валідних об'єктів, список проблем)."""
+    name = uploaded.name.lower()
+    if name.endswith(".csv"):
+        raw = pd.read_csv(uploaded)
+    elif name.endswith(".xlsx"):
+        raw = pd.read_excel(uploaded)
+    else:
+        data = json.loads(uploaded.getvalue().decode("utf-8-sig"))
+        if isinstance(data, dict):
+            data = data.get("objects", [])
+        raw = pd.DataFrame(data)
+    required = ["name", "latitude", "longitude", "type"]
+    missing = [c for c in required if c not in raw.columns]
+    if missing:
+        return [], [f"Відсутні обов'язкові поля: {', '.join(missing)}"]
+    valid, problems = [], []
+    existing = {o["name"].strip().lower() for o in st.session_state.objects}
+    seen = set()
+    for i, r in raw.iterrows():
+        row_no = i + 2
+        nm = str(r["name"]).strip()
+        try:
+            lat, lon = float(r["latitude"]), float(r["longitude"])
+        except (TypeError, ValueError):
+            problems.append(f"Рядок {row_no}: некоректні координати")
+            continue
+        if not nm or nm.lower() == "nan":
+            problems.append(f"Рядок {row_no}: порожня назва")
+        elif not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            problems.append(f"Рядок {row_no} «{nm}»: координати поза діапазоном")
+        elif str(r["type"]) not in GIS_OBJECT_TYPES:
+            problems.append(f"Рядок {row_no} «{nm}»: невідомий тип «{r['type']}» (дозволено: {', '.join(GIS_OBJECT_TYPES)})")
+        elif nm.lower() in existing or nm.lower() in seen:
+            problems.append(f"Рядок {row_no} «{nm}»: об'єкт з такою назвою вже існує")
+        else:
+            seen.add(nm.lower())
+            def _get(col, default):
+                v = r[col] if col in raw.columns else default
+                return default if (v is None or str(v) == "nan" or str(v).strip() == "") else str(v).strip()
+            sub = _get("subdivision", list(st.session_state.org_structure.keys())[0])
+            valid.append({
+                "name": nm, "type": str(r["type"]),
+                "status": _get("status", "Нормальна") if _get("status", "Нормальна") in GIS_STATUS_OPTIONS else "Нормальна",
+                "desc": _get("desc", "Імпортовано з файлу."),
+                "latitude": round(lat, 5), "longitude": round(lon, 5),
+                "criticality": _get("criticality", "Середня") if _get("criticality", "Середня") in GIS_CRITICALITY_OPTIONS else "Середня",
+                "subdivision": sub if sub in st.session_state.org_structure else list(st.session_state.org_structure.keys())[0],
+            })
+    return valid, problems
+
 if "data" in tab_map:
     with tab_map["data"]:
         st.title("💾 Data-Центр: Архітектура та Синхронізація")
@@ -4414,13 +4606,12 @@ if "data" in tab_map:
 
             # Експорт кнопок
             c_exp1, c_exp2 = st.columns(2)
-            csv_data = curr_df.to_csv(index=False).encode('utf-8')
-            c_exp1.download_button("📥 CSV-лог", data=csv_data, file_name="voe_log_export.csv",
+            c_exp1.download_button("📥 CSV-лог", data=to_csv_bytes(curr_df), file_name="voe_log_export.csv",
                                    mime="text/csv", use_container_width=True)
 
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                curr_df.to_excel(writer, index=False, sheet_name='Журнал Подій')
+                csv_safe(curr_df).to_excel(writer, index=False, sheet_name='Журнал Подій')
             c_exp2.download_button("📊 Excel-звіт", data=buffer.getvalue(), file_name="voe_report.xlsx",
                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                    use_container_width=True)
@@ -4431,26 +4622,50 @@ if "data" in tab_map:
 
         with col_imp:
             st.subheader("📥 Імпорт та Синхронізація")
-            st.warning("Увага: Імпорт конфігурацій змінює поточний стан ГІС-системи.")
+            st.warning("Увага: Імпорт конфігурацій змінює поточний стан ГІС-системи (додає об'єкти мережі).")
             st.markdown("""
             Завантажте файл оновлення мережі або реєстр нових об'єктів.
             **Вимоги до файлу:**
             * Формат: .csv (UTF-8), .xlsx або .json
-            * Наявність полів: `name`, `latitude`, `longitude`, `type`
-            * Необхідна наявність ЕЦП для підтвердження транзакції.
+            * Обов'язкові поля: `name`, `latitude`, `longitude`, `type` (Опора / Підстанція / Центр клієнтів)
+            * Необов'язкові: `status`, `criticality`, `subdivision`, `desc`
+            * Об'єкти з уже наявною назвою пропускаються.
             """)
 
             uploaded_file = st.file_uploader("Оберіть файл для завантаження:", type=["csv", "xlsx", "json"])
 
             if uploaded_file is not None:
                 st.info(f"📁 Файл: **{uploaded_file.name}** ({uploaded_file.size} bytes)")
-                with st.spinner('Проводиться валідація даних...'):
-                    time.sleep(1.5)
-                    st.success("✅ Структура файлу відповідає стандартам VOE.")
+                try:
+                    import_valid, import_problems = parse_objects_import(uploaded_file)
+                except Exception as e:
+                    import_valid, import_problems = [], [f"Не вдалося прочитати файл: {e}"]
 
+                if import_problems:
+                    with st.expander(f"⚠️ Проблеми у файлі ({len(import_problems)})", expanded=not import_valid):
+                        for p in import_problems[:50]:
+                            st.write("•", p)
+                if import_valid:
+                    st.success(f"✅ Готово до імпорту: {len(import_valid)} об'єктів.")
+                    st.dataframe(pd.DataFrame(import_valid)[["name", "type", "latitude", "longitude", "status", "subdivision"]],
+                                 use_container_width=True, hide_index=True, height=200)
                     if st.button("🚀 Застосувати зміни в БД", type="primary", use_container_width=True):
+                        st.session_state.objects.extend(import_valid)
+                        st.session_state.gis_object_counter += len(import_valid)
+                        now_str = datetime.datetime.now().strftime("%d.%m %H:%M")
+                        st.session_state.log_data.insert(0, {
+                            "Час": now_str, "Тип": "Інспекція", "Об'єкт": "Data Центр",
+                            "Опис": f"[{current_user['display_name']}] 💾 Імпорт об'єктів з файлу «{uploaded_file.name}»: додано {len(import_valid)}, пропущено {len(import_problems)}.",
+                            "Критичність": "Висока",
+                        })
+                        st.session_state.gis_edit_log.insert(0, {
+                            "Час": now_str, "Дія": "Імпорт", "Об'єкт": f"{len(import_valid)} шт.", "Тип": "—",
+                            "Координати": "—", "Автор": current_user["display_name"],
+                        })
                         st.balloons()
-                        st.success("Базу даних успішно оновлено. Система перезавантажується.")
+                        st.success(f"Імпортовано об'єктів: {len(import_valid)}.")
+                else:
+                    st.error("Немає жодного валідного об'єкта для імпорту.")
 
         st.divider()
 
@@ -4479,7 +4694,7 @@ if "users" in tab_map:
         st.info("ℹ️ Ця вкладка доступна виключно адміністраторам системи.")
         st.subheader("📋 Облікові записи системи")
         users_display = []
-        for login, data in USERS_DB.items():
+        for login, data in ACTIVE_USERS.items():
             users_display.append({
                 "Логін": login, "Ім'я та посада": data["display_name"],
                 "Підрозділ": data["subdivision"], "Роль": ROLE_LABELS.get(data["role"], data["role"]),
