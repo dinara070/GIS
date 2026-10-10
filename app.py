@@ -1075,7 +1075,7 @@ def get_marker_color(status):
     return "green"
 
 def get_marker_icon(obj_type):
-    return {"Підстанція": "bolt", "Опора": "map-pin", "Центр клієнтів": "users"}.get(obj_type, "circle-info")
+    return {"Підстанція": "bolt", "Опора": "map-pin", "Центр клієнтів": "users"}.get(obj_type, "info")
 
 def build_popup_html(obj):
     status = obj.get("status", "Нормальна")
@@ -1098,8 +1098,30 @@ def build_popup_html(obj):
       </table>
     </div>"""
 
+# Тайли без API-ключа. Раніше "CartoDB dark_matter" у folium >= 0.20 вимагає ключ (карта лишалась порожньою),
+# тому беремо стандартні OpenStreetMap і затемнюємо їх CSS-фільтром (темна тема диспетчерської).
+MAP_TILES_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+MAP_TILES_ATTR = "&copy; OpenStreetMap contributors"
+
+def _new_dark_map(location, zoom):
+    return folium.Map(location=location, zoom_start=zoom, control_scale=True,
+                      tiles=MAP_TILES_URL, attr=MAP_TILES_ATTR)
+
+def _finish_map(m):
+    """Затемнює тайли та примусово перераховує розмір карти.
+    У прихованій вкладці контейнер має нульовий розмір — без invalidateSize карта сіра/обрізана."""
+    css = (".leaflet-container{background:#1b1f27;}"
+           ".leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.92) contrast(.88);}")
+    m.get_root().header.add_child(folium.Element(f"<style>{css}</style>"))
+    js = ("(function(){function fix(){try{for(var k in window){var v=window[k];"
+          "if(v&&window.L&&v instanceof window.L.Map){v.invalidateSize();}}}catch(e){}}"
+          "window.addEventListener('load',function(){setTimeout(fix,150);setTimeout(fix,600);"
+          "if(window.ResizeObserver){new ResizeObserver(fix).observe(document.body);}});})();")
+    m.get_root().script.add_child(folium.Element(js))
+    return m
+
 def build_folium_map(objects, active_layers):
-    fmap = folium.Map(location=[49.0, 28.4], zoom_start=8, tiles="CartoDB dark_matter")
+    fmap = _new_dark_map([49.0, 28.4], 8)
     if "Зони СО" in active_layers:
         SO_ZONES = [
             {"name": "СО «Вінницькі міські ЕМ»", "color": "#38bdf8",
@@ -1195,7 +1217,7 @@ def build_folium_map(objects, active_layers):
                 location=[flat, flon],
                 tooltip=folium.Tooltip(f"🏥 {esc(str(fac['name']))} — аварійна броня", sticky=True),
                 popup=folium.Popup(fac_popup, max_width=280),
-                icon=folium.Icon(color="blue", icon="plus-square", prefix="fa"),
+                icon=folium.Icon(color="blue", icon="plus", prefix="fa"),
             ).add_to(shield_group)
         shield_group.add_to(fmap)
     legend_html = """
@@ -1214,7 +1236,7 @@ def build_folium_map(objects, active_layers):
     </div>"""
     fmap.get_root().html.add_child(folium.Element(legend_html))
     folium.LayerControl(collapsed=False).add_to(fmap)
-    return fmap
+    return _finish_map(fmap)
 
 # ==========================================
 # 🧠 ІНТЕЛЕКТУАЛЬНА ДІАГНОСТИКА — НОРМИ ГОСТ ТА ДОПОМІЖНІ ФУНКЦІЇ
@@ -1372,27 +1394,30 @@ if "map" in tab_map:
             if show_zones:   active_layers.append("Зони СО")
             if show_loto:    active_layers.append("Небезпечні зони")
             if show_shield:  active_layers.append("Аварійна броня")
+            obj_names = [o["name"] for o in st.session_state.objects]
+            # значення селектбокса живе в session_state (key), тому клік по мапі змінює його лише для НОВОГО кліка
+            if obj_names and st.session_state.get("map_obj_select") not in obj_names:
+                _cur = (st.session_state.get("selected_object") or {}).get("name")
+                st.session_state.map_obj_select = _cur if _cur in obj_names else obj_names[0]
             if FOLIUM_AVAILABLE:
                 fmap = build_folium_map(st.session_state.objects, active_layers)
-                map_result = st_folium(fmap, use_container_width=True, height=520, returned_objects=["last_object_clicked"])
+                map_result = st_folium(fmap, use_container_width=True, height=520,
+                                       returned_objects=["last_object_clicked"], key="dispatcher_map")
                 clk = (map_result or {}).get("last_object_clicked")
                 if clk and clk.get("lat") is not None and st.session_state.objects:
-                    # точний вибір за координатами (підрядковий збіг назв плутав «ТП-1» і «ТП-12»)
-                    def _d2(o):
-                        return (o["latitude"] - clk["lat"]) ** 2 + (o["longitude"] - clk["lng"]) ** 2
-                    nearest = min(st.session_state.objects, key=_d2)
-                    if _d2(nearest) < 1e-6:
-                        st.session_state.selected_object = nearest
+                    click_sig = (round(clk["lat"], 6), round(clk["lng"], 6))
+                    if click_sig != st.session_state.get("map_click_sig"):  # ігноруємо «застарілий» клік після rerun
+                        st.session_state.map_click_sig = click_sig
+                        def _d2(o):
+                            return (o["latitude"] - clk["lat"]) ** 2 + (o["longitude"] - clk["lng"]) ** 2
+                        nearest = min(st.session_state.objects, key=_d2)
+                        if _d2(nearest) < 1e-6:
+                            st.session_state.map_obj_select = nearest["name"]
             else:
                 map_df = pd.DataFrame(st.session_state.objects)
-                st.map(map_df, size=40)
+                st.map(map_df, latitude="latitude", longitude="longitude", size=40)
             st.markdown("##### 🔍 Вибір об'єкта для телеметрії:")
-            obj_names = [o["name"] for o in st.session_state.objects]
-            try:
-                curr_index = obj_names.index(st.session_state.selected_object["name"])
-            except ValueError:
-                curr_index = 0
-            selected_name = st.selectbox("Оберіть вузол:", obj_names, index=curr_index)
+            selected_name = st.selectbox("Оберіть вузол:", obj_names, key="map_obj_select")
             for o in st.session_state.objects:
                 if o["name"] == selected_name:
                     st.session_state.selected_object = o
@@ -1481,16 +1506,26 @@ if "gis_editor" in tab_map:
             with col_editor_map:
                 st.markdown("##### 🖱️ Клікніть на мапі, щоб обрати місце нового об'єкта")
                 editor_map = build_folium_map(st.session_state.objects, ["Об'єкти", "ЛЕП", "Зони СО"])
+                _pp = st.session_state.gis_pending_point
+                if _pp:
+                    folium.Marker([_pp["lat"], _pp["lon"]], tooltip="Нова точка",
+                                  icon=folium.Icon(color="purple", icon="plus", prefix="fa")).add_to(editor_map)
                 editor_result = st_folium(
                     editor_map, use_container_width=True, height=520,
                     returned_objects=["last_clicked"], key="gis_editor_map"
                 )
                 clicked = (editor_result or {}).get("last_clicked")
                 if clicked and clicked.get("lat") is not None:
-                    st.session_state.gis_pending_point = {
-                        "lat": round(clicked["lat"], 5),
-                        "lon": round(clicked["lng"], 5),
-                    }
+                    # st_folium повертає останній клік і після наступних rerun — обробляємо кожен клік один раз,
+                    # інакше «Скинути точку» та додавання об'єкта миттєво скасовувались би старим кліком
+                    gis_sig = (round(clicked["lat"], 6), round(clicked["lng"], 6))
+                    if gis_sig != st.session_state.get("gis_click_sig"):
+                        st.session_state.gis_click_sig = gis_sig
+                        st.session_state.gis_pending_point = {
+                            "lat": round(clicked["lat"], 5),
+                            "lon": round(clicked["lng"], 5),
+                        }
+                        st.rerun()
 
                 if st.session_state.gis_pending_point:
                     pt = st.session_state.gis_pending_point
@@ -3479,7 +3514,7 @@ if "structure" in tab_map:
             * **👥 Центр обслуговування клієнтів (ЦОК)** — прийом споживачів.
             """)
             if FOLIUM_AVAILABLE:
-                sh_map = folium.Map(location=[48.7377,28.0813], zoom_start=15, tiles="CartoDB dark_matter")
+                sh_map = _new_dark_map([48.7377, 28.0813], 15)
                 sh_objects = [
                     {"name":"ТП-Шаргород-100","latitude":48.7364,"longitude":28.0822,"type":"Підстанція","status":"Нормальна","criticality":"Висока","subdivision":"СО «Жмеринські ЕМ»","desc":"ВН-35/10 кВ."},
                     {"name":"ЦОК Шаргород","latitude":48.7390,"longitude":28.0805,"type":"Центр клієнтів","status":"Нормальна","criticality":"Низька","subdivision":"СО «Жмеринські ЕМ»","desc":"Прийом споживачів."},
@@ -3489,7 +3524,8 @@ if "structure" in tab_map:
                                   popup=folium.Popup(build_popup_html(o), max_width=280),
                                   icon=folium.Icon(color=get_marker_color(o["status"]), icon=get_marker_icon(o["type"]), prefix="fa")).add_to(sh_map)
                 folium.PolyLine([[48.7364,28.0822],[48.7390,28.0805]], color="#4ade80", weight=2, dash_array="4 3").add_to(sh_map)
-                st_folium(sh_map, use_container_width=True, height=300, returned_objects=[])
+                _finish_map(sh_map)
+                st_folium(sh_map, use_container_width=True, height=300, returned_objects=[], key="structure_map")
 
 # ==========================================
 # ВКЛАДКА: АНАЛІТИКА ТА KPI
@@ -3935,7 +3971,7 @@ if "crm" in tab_map:
                 st.caption("Кольорове кодування: 🟢 < 2 млн грн | 🟡 2–4 млн грн | 🔴 > 4 млн грн")
 
                 if FOLIUM_AVAILABLE:
-                    debt_map = folium.Map(location=[49.0, 28.5], zoom_start=8, tiles="CartoDB dark_matter")
+                    debt_map = _new_dark_map([49.0, 28.5], 8)
 
                     for d in CRM_DISTRICTS:
                         debt_m = d["debt_uah"] / 1_000_000
@@ -4001,7 +4037,8 @@ if "crm" in tab_map:
                       <i style="color:#64748b;font-size:10px">Розмір кола ∝ сумі боргу</i>
                     </div>"""
                     debt_map.get_root().html.add_child(folium.Element(legend_debt))
-                    st_folium(debt_map, use_container_width=True, height=480, returned_objects=[])
+                    _finish_map(debt_map)
+                    st_folium(debt_map, use_container_width=True, height=480, returned_objects=[], key="crm_debt_map")
 
                 else:
                     st.warning("⚠️ Folium не встановлено. Встановіть: `pip install folium streamlit-folium`")
